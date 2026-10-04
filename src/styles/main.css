@@ -1,0 +1,173 @@
+@import './variables.css';
+
+/* Base Reset & Industrial Application Foundation */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-base);
+  color: var(--text-primary);
+  background-color: var(--background);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--primary-dark);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+h1 { font-size: var(--font-size-2xl); }
+h2 { font-size: var(--font-size-xl); }
+h3 { font-size: var(--font-size-lg); }
+
+a {
+  color: var(--primary-blue);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+a:hover {
+  color: var(--primary-dark);
+}
+
+/* Surface / Card Foundation */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: 20px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 12px;
+}
+
+.card-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--primary-dark);
+}
+
+/* Status Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.badge-normal {
+  background-color: var(--status-normal-bg);
+  color: var(--status-normal-text);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.badge-watch {
+  background-color: var(--status-watch-bg);
+  color: var(--status-watch-text);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.badge-alarm {
+  background-color: var(--status-alarm-bg);
+  color: var(--status-alarm-text);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.badge-trip {
+  background-color: var(--status-trip-bg);
+  color: var(--status-trip-text);
+  border: 1px solid rgba(153, 27, 27, 0.3);
+}
+
+.badge-gap {
+  background-color: var(--status-gap-bg);
+  color: var(--status-gap-text);
+  border: 1px solid rgba(107, 114, 128, 0.3);
+}
+
+/* Priority Badges */
+.badge-p1 {
+  background-color: var(--priority-p1-bg);
+  color: var(--priority-p1);
+  border: 1px solid var(--priority-p1);
+}
+
+.badge-p2 {
+  background-color: var(--priority-p2-bg);
+  color: var(--priority-p2);
+  border: 1px solid var(--priority-p2);
+}
+
+.badge-p3 {
+  background-color: var(--priority-p3-bg);
+  color: var(--priority-p3);
+  border: 1px solid var(--priority-p3);
+}
+
+.badge-p4 {
+  background-color: var(--priority-p4-bg);
+  color: var(--priority-p4);
+  border: 1px solid var(--priority-p4);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+.btn-primary {
+  background-color: var(--primary-blue);
+  color: var(--text-inverse);
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-dark);
+}
+
+.btn-outline {
+  background-color: var(--surface);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.btn-outline:hover {
+  background-color: var(--surface-alt);
+  border-color: var(--primary-blue);
+}

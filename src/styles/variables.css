@@ -1,0 +1,80 @@
+/* Cali-INI Design System Tokens - Source: 04_Cali_INI_Design_System_and_Logo.md */
+:root {
+  /* Primary Corporate Colors */
+  --primary-dark: #0C2F7A;
+  --primary-blue: #1A5CC8;
+  --primary-navy: #1A3A6E;
+  --accent-turquoise: #4DD4C8;
+  --brand-blue: #2477B9;
+  --brand-cyan: #4BC0D5;
+
+  /* Neutral Surface & Backgrounds */
+  --background: #F0F4F9;
+  --surface: #FFFFFF;
+  --surface-alt: #F8FAFC;
+  --border: #D9E1EA;
+  --border-subtle: #E8EDF3;
+  --border-focus: #1A5CC8;
+
+  /* Text Colors */
+  --text-primary: #17345F;
+  --text-secondary: #5F6F85;
+  --text-muted: #8A94A3;
+  --text-inverse: #FFFFFF;
+
+  /* Semantic Status Colors (Operational meaning) */
+  --status-normal: #10B981;
+  --status-normal-bg: #E6F7F0;
+  --status-normal-text: #065F46;
+
+  --status-watch: #F59E0B;
+  --status-watch-bg: #FEF3C7;
+  --status-watch-text: #92400E;
+
+  --status-alarm: #EF4444;
+  --status-alarm-bg: #FEE2E2;
+  --status-alarm-text: #991B1B;
+
+  --status-trip: #991B1B;
+  --status-trip-bg: #FEE2E2;
+  --status-trip-text: #7F1D1D;
+
+  --status-gap: #6B7280;
+  --status-gap-bg: #F3F4F6;
+  --status-gap-text: #374151;
+
+  /* Priority Levels */
+  --priority-p1: #DC2626;
+  --priority-p1-bg: #FEF2F2;
+  --priority-p2: #EA580C;
+  --priority-p2-bg: #FFF7ED;
+  --priority-p3: #2563EB;
+  --priority-p3-bg: #EFF6FF;
+  --priority-p4: #6B7280;
+  --priority-p4-bg: #F9FAFB;
+
+  /* Layout Dimensions */
+  --sidebar-width: 250px;
+  --header-height: 64px;
+
+  /* Typography Scale */
+  --font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-md: 14px;
+  --font-size-base: 15px;
+  --font-size-lg: 18px;
+  --font-size-xl: 22px;
+  --font-size-2xl: 26px;
+  --font-size-kpi: 32px;
+
+  /* Elevation / Shadows */
+  --shadow-sm: 0 1px 2px rgba(12, 47, 122, 0.04);
+  --shadow-card: 0 1px 3px rgba(12, 47, 122, 0.06), 0 1px 2px rgba(12, 47, 122, 0.03);
+  --shadow-hover: 0 4px 6px -1px rgba(12, 47, 122, 0.08), 0 2px 4px -1px rgba(12, 47, 122, 0.04);
+
+  /* Border Radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}

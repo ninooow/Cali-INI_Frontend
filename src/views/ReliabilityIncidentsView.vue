@@ -16,10 +16,6 @@
 
       <!-- Action Buttons -->
       <div class="header-actions">
-        <button class="btn btn-outline" @click="refreshData" :disabled="loadingData">
-          <span v-if="loadingData">Refreshing...</span>
-          <span v-else>↻ Refresh</span>
-        </button>
         <button v-if="activeModule === 'incidents'" class="btn btn-primary" @click="openNewIncidentModal">
           <span>+ New Incident</span>
         </button>
@@ -36,7 +32,6 @@
         :class="{ active: activeModule === 'incidents' }"
         @click="switchModule('incidents')"
       >
-        <span class="tab-icon">📋</span>
         <span class="tab-text">Incident Register</span>
         <span class="tab-counter">{{ incidents.length }}</span>
       </button>
@@ -46,7 +41,6 @@
         :class="{ active: activeModule === 'rca' }"
         @click="switchModule('rca')"
       >
-        <span class="tab-icon">🔍</span>
         <span class="tab-text">RCA Investigations</span>
         <span class="tab-counter">{{ rcaHeaders.length }}</span>
       </button>

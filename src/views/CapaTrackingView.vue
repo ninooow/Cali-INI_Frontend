@@ -10,7 +10,7 @@
         </div>
         <h1 class="view-title">Corrective &amp; Preventive Action Tracking</h1>
         <p class="view-subtitle">
-          Track, create, and review CAPA actions linked to RCA investigations. Each action is scoped to an AR Number.
+          Track and review CAPA actions linked to RCA investigations. Each action is scoped to an AR Number.
         </p>
       </div>
 
@@ -19,54 +19,81 @@
           <span v-if="loadingCapa">Refreshing...</span>
           <span v-else>↻ Refresh</span>
         </button>
-        <button class="btn btn-primary" @click="openNewCapaModal" :disabled="!selectedArNo">
-          <span>+ New CAPA</span>
-        </button>
       </div>
     </header>
 
-    <!-- WHY: RCA Selector Panel -->
-    <div class="card selector-card">
-      <div class="selector-header">
-        <span class="selector-label">Select RCA Investigation</span>
-        <span class="selector-hint">CAPA actions are scoped per AR Number — no global list is available.</span>
-      </div>
-
-      <div class="selector-row">
-        <div class="selector-search">
-          <label class="filter-label">Search RCA</label>
+    <!-- RCA Worklist: visible immediately -->
+    <div class="card rca-list-card">
+      <div class="section-header-bar">
+        <div>
+          <h2 class="section-title">RCA Investigations</h2>
+          <span class="section-count">{{ filteredRcaList.length }} records</span>
+        </div>
+        <div class="rca-filter-row">
           <input
             v-model="rcaSearch"
             type="text"
-            placeholder="Filter by AR No or Tag Number..."
-            class="filter-control"
+            placeholder="Search AR No or Tag Number..."
+            class="filter-control rca-search-control"
           />
-        </div>
-
-        <div class="selector-dropdown">
-          <label class="filter-label">AR Number</label>
-          <select v-model="selectedArNo" class="filter-control" @change="onArSelected">
-            <option value="">— Select AR —</option>
-            <option
-              v-for="rca in filteredRcaList"
-              :key="rca.ar_no"
-              :value="rca.ar_no"
-            >
-              {{ rca.ar_no }} — {{ rca.tag_number || 'No Tag' }}
-            </option>
-          </select>
+          <button v-if="rcaSearch" class="btn btn-outline btn-reset" @click="rcaSearch = ''">Reset</button>
         </div>
       </div>
 
-      <!-- Loading RCA list -->
       <div v-if="loadingRcaList" class="inline-loading">
         <div class="spinner-sm"></div>
         <span>Loading RCA headers...</span>
       </div>
 
-      <!-- Error loading RCA list -->
       <div v-if="rcaListError" class="inline-error">
         <span>⚠ {{ rcaListError }}</span>
+      </div>
+
+      <DataTable
+        v-if="!loadingRcaList"
+        :columns="rcaColumns"
+        :rows="paginatedRcaList"
+        :loading="loadingRcaList"
+        empty-message="No RCA investigations found."
+      >
+        <template #item-ar_no="{ item }">
+          <span class="mono-code">{{ item.ar_no }}</span>
+        </template>
+
+        <template #item-tag_number="{ item }">
+          <span>{{ item.tag_number || '—' }}</span>
+        </template>
+
+        <template #item-pre_risk="{ item }">
+          <span :class="['risk-pill', `risk-${(item.pre_risk || 'MEDIUM').toLowerCase()}`]">
+            {{ item.pre_risk || '—' }}
+          </span>
+        </template>
+
+        <template #item-actions="{ item }">
+          <button
+            class="btn btn-sm"
+            :class="selectedArNo === item.ar_no ? 'btn-primary' : 'btn-outline'"
+            @click="selectRca(item)"
+          >
+            {{ selectedArNo === item.ar_no ? 'Selected' : 'View CAPA' }}
+          </button>
+        </template>
+      </DataTable>
+
+      <div class="pagination-bar" v-if="filteredRcaList.length">
+        <label class="page-size-control">
+          Rows
+          <select v-model.number="rcaPageSize" class="filter-control page-size-select">
+            <option :value="10">10</option>
+            <option :value="25">25</option>
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+          </select>
+        </label>
+        <button class="btn btn-outline btn-sm" :disabled="rcaPage <= 1" @click="rcaPage--">← Prev</button>
+        <span class="page-info">Page {{ rcaPage }} of {{ rcaTotalPages }}</span>
+        <button class="btn btn-outline btn-sm" :disabled="rcaPage >= rcaTotalPages" @click="rcaPage++">Next →</button>
       </div>
     </div>
 
@@ -83,7 +110,18 @@
       <button class="banner-close" @click="errorBanner = ''">×</button>
     </div>
 
-    <!-- HOW: RCA Context Summary -->
+        <!-- Combined Problem → RCA → CAPA modal -->
+    <div v-if="showDetailModal" class="modal-backdrop detail-backdrop" @click.self="closeRcaSelection">
+      <div class="modal-container capa-detail-modal">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title">Problem, RCA &amp; CAPA</h2>
+            <span class="modal-subtitle">{{ selectedArNo }}</span>
+          </div>
+          <button class="modal-close-btn" @click="closeRcaSelection">×</button>
+        </div>
+        <div class="modal-body capa-detail-body">
+<!-- HOW: RCA Context Summary -->
     <div v-if="selectedRcaHeader && !loadingRcaDetail" class="card rca-context-card">
       <div class="context-header">
         <div class="context-left">
@@ -102,11 +140,11 @@
       </div>
       <div class="context-statements">
         <div class="context-stmt">
-          <span class="stmt-label">Problem</span>
+          <span class="stmt-label">1 · Problem</span>
           <p>{{ selectedRcaHeader.problem_statement || 'No problem statement recorded.' }}</p>
         </div>
         <div class="context-stmt">
-          <span class="stmt-label">Root Cause</span>
+          <span class="stmt-label">2 · RCA — Root Cause</span>
           <p>{{ selectedRcaHeader.root_cause_statement || 'No root cause statement recorded.' }}</p>
         </div>
       </div>
@@ -120,15 +158,17 @@
     <!-- HOW: CAPA Actions Table -->
     <div v-if="selectedArNo" class="capa-table-section">
       <div class="section-header-bar">
-        <h2 class="section-title">CAPA Actions for {{ selectedArNo }}</h2>
-        <span class="section-count">{{ paginatedCapas.length }} of {{ capaList.length }} actions</span>
+        <div>
+          <h2 class="section-title">3 · CAPA Actions — {{ selectedArNo }}</h2>
+          <span class="section-count">{{ paginatedCapas.length }} of {{ capaList.length }} actions</span>
+        </div>
       </div>
 
       <DataTable
         :columns="capaColumns"
         :rows="paginatedCapas"
         :loading="loadingCapa"
-        empty-message="No CAPA actions registered for this AR. Click '+ New CAPA' to create one."
+        empty-message="No CAPA actions registered for this AR."
       >
         <template #item-rc="{ item }">
           <span class="mono-code">{{ item.rc || '—' }}</span>
@@ -164,164 +204,74 @@
       </DataTable>
 
       <!-- Pagination -->
-      <div v-if="capaTotalPages > 1" class="pagination-bar">
+      <div v-if="capaList.length" class="pagination-bar">
+        <label class="page-size-control">
+          Rows
+          <select v-model.number="capaPageSize" class="filter-control page-size-select">
+            <option :value="10">10</option>
+            <option :value="25">25</option>
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+          </select>
+        </label>
         <button class="btn btn-outline btn-sm" :disabled="capaPage <= 1" @click="capaPage--">← Prev</button>
         <span class="page-info">Page {{ capaPage }} of {{ capaTotalPages }}</span>
         <button class="btn btn-outline btn-sm" :disabled="capaPage >= capaTotalPages" @click="capaPage++">Next →</button>
       </div>
     </div>
 
-    <!-- Empty State: No AR Selected -->
-    <div v-if="!selectedArNo && !loadingRcaList" class="card empty-state-card">
-      <span class="empty-icon-large">📋</span>
-      <h3>No RCA Investigation Selected</h3>
-      <p>Select an AR Number from the dropdown above to view and manage CAPA actions for that investigation.</p>
-    </div>
-
-    <!-- Modal: + New CAPA -->
-    <div v-if="showNewCapaModal" class="modal-backdrop" @click.self="showNewCapaModal = false">
-      <div class="modal-container">
-        <div class="modal-header">
-          <h2 class="modal-title">Create CAPA Action — {{ selectedArNo }}</h2>
-          <button class="modal-close-btn" @click="showNewCapaModal = false">×</button>
         </div>
-        <form @submit.prevent="submitCreateCapa">
-          <div class="modal-body">
-            <div v-if="capaFormError" class="modal-error-alert">
-              <span>⚠ {{ capaFormError }}</span>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group flex-1">
-                <label class="form-label required">Root Cause ID</label>
-                <input
-                  v-model="newCapa.rc"
-                  type="text"
-                  placeholder="e.g. RC-01"
-                  class="form-control"
-                  required
-                />
-              </div>
-              <div class="form-group flex-1">
-                <label class="form-label">Action Type</label>
-                <!-- Only CORRECTIVE confirmed by contract; PREVENTIVE pending backend enum verification -->
-                <input
-                  v-model="newCapa.action_type"
-                  type="text"
-                  class="form-control"
-                  readonly
-                />
-              </div>
-            </div>
-
-            <div class="form-group mt-3">
-              <label class="form-label required">Action Plan</label>
-              <textarea
-                v-model="newCapa.action_plan"
-                rows="3"
-                placeholder="Describe the corrective or preventive action to be taken..."
-                class="form-control"
-                required
-              ></textarea>
-            </div>
-
-            <div class="form-row mt-3">
-              <div class="form-group flex-1">
-                <label class="form-label required">Target Date</label>
-                <input
-                  v-model="newCapa.target_date"
-                  type="date"
-                  class="form-control"
-                  required
-                />
-              </div>
-              <div class="form-group flex-1">
-                <label class="form-label required">PIC (Person In Charge)</label>
-                <input
-                  v-model="newCapa.pic"
-                  type="text"
-                  placeholder="e.g. Ahmad Fauzi"
-                  class="form-control"
-                  required
-                />
-              </div>
-            </div>
-
-            <div class="form-row mt-3">
-              <div class="form-group flex-1">
-                <label class="form-label">Status</label>
-                <!-- Only OPEN confirmed by contract; IN_PROGRESS/CLOSED pending backend enum verification -->
-                <input
-                  v-model="newCapa.status"
-                  type="text"
-                  class="form-control"
-                  readonly
-                />
-              </div>
-            </div>
-
-            <div class="fingerprint-info mt-3">
-              <span class="fp-label">Fingerprint (auto-generated):</span>
-              <span class="fp-value mono-code">{{ computedFingerprint || 'Will be computed on submit' }}</span>
-            </div>
-          </div>
-
-          <div class="modal-footer">
-            <button type="button" class="btn btn-outline" @click="showNewCapaModal = false" :disabled="submittingCapa">
-              Cancel
-            </button>
-            <button type="submit" class="btn btn-primary" :disabled="submittingCapa">
-              <span v-if="submittingCapa">Saving CAPA...</span>
-              <span v-else>Save CAPA Action</span>
-            </button>
-          </div>
-        </form>
       </div>
     </div>
+
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { apiClient } from '@/api/client'
 import { ENDPOINTS } from '@/api/endpoints'
 import DataTable from '@/components/common/DataTable.vue'
+
+const route = useRoute()
+const router = useRouter()
 
 // State
 const loadingRcaList = ref(false)
 const loadingRcaDetail = ref(false)
 const loadingCapa = ref(false)
-const submittingCapa = ref(false)
 
 const rcaList = ref([])
 const selectedArNo = ref('')
 const selectedRcaHeader = ref(null)
 const capaList = ref([])
+const showDetailModal = ref(false)
 
-const showNewCapaModal = ref(false)
 
 // Banners & Errors
 const successBanner = ref('')
 const errorBanner = ref('')
 const rcaListError = ref('')
-const capaFormError = ref('')
 
 // Filters & Pagination
 const rcaSearch = ref('')
+const rcaPage = ref(1)
+const rcaPageSize = ref(10)
 const capaPage = ref(1)
-const PAGE_SIZE = 25
+const capaPageSize = ref(10)
 
-// New CAPA Form
-const newCapa = ref({
-  rc: '',
-  action_type: 'CORRECTIVE',
-  action_plan: '',
-  target_date: '',
-  pic: '',
-  status: 'OPEN'
-})
 
 // Table Columns
+const rcaColumns = [
+  { key: 'ar_no', label: 'AR Number', width: '18%' },
+  { key: 'tag_number', label: 'Tag Number', width: '18%' },
+  { key: 'plant', label: 'Plant', width: '14%' },
+  { key: 'problem_statement', label: 'Problem Statement', width: '30%' },
+  { key: 'pre_risk', label: 'Risk', width: '10%' },
+  { key: 'actions', label: '', align: 'right', width: '10%' }
+]
+
 const capaColumns = [
   { key: 'rc', label: 'Root Cause', width: '10%' },
   { key: 'action_type', label: 'Type', width: '12%' },
@@ -342,17 +292,18 @@ const filteredRcaList = computed(() => {
   )
 })
 
-const capaTotalPages = computed(() => Math.max(1, Math.ceil(capaList.value.length / PAGE_SIZE)))
-const paginatedCapas = computed(() => {
-  const start = (capaPage.value - 1) * PAGE_SIZE
-  return capaList.value.slice(start, start + PAGE_SIZE)
+const rcaTotalPages = computed(() => Math.max(1, Math.ceil(filteredRcaList.value.length / rcaPageSize.value)))
+const paginatedRcaList = computed(() => {
+  const start = (rcaPage.value - 1) * rcaPageSize.value
+  return filteredRcaList.value.slice(start, start + rcaPageSize.value)
 })
 
-// SHA-256 fingerprint from action_plan text
-const computedFingerprint = computed(() => {
-  if (!newCapa.value.action_plan) return ''
-  return generateFingerprintSync(newCapa.value.action_plan)
+const capaTotalPages = computed(() => Math.max(1, Math.ceil(capaList.value.length / capaPageSize.value)))
+const paginatedCapas = computed(() => {
+  const start = (capaPage.value - 1) * capaPageSize.value
+  return capaList.value.slice(start, start + capaPageSize.value)
 })
+
 
 // Helpers
 const formatDate = (isoString) => {
@@ -365,35 +316,6 @@ const formatDate = (isoString) => {
   }
 }
 
-/**
- * Generate a SHA-256 fingerprint synchronously using a simple hash.
- * In production, crypto.subtle.digest would be preferred but it's async.
- * We use a deterministic string hash padded to 64 hex chars for contract compliance.
- */
-function generateFingerprintSync(text) {
-  // Use a simple deterministic hash for preview; actual submit uses crypto.subtle
-  let hash = 0
-  for (let i = 0; i < text.length; i++) {
-    const char = text.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
-    hash = hash & hash // Convert to 32bit integer
-  }
-  const hex = Math.abs(hash).toString(16)
-  return hex.padStart(64, '0')
-}
-
-async function generateFingerprint(text) {
-  try {
-    const encoder = new TextEncoder()
-    const data = encoder.encode(text)
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-    const hashArray = Array.from(new Uint8Array(hashBuffer))
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
-  } catch {
-    // Fallback for environments without crypto.subtle
-    return generateFingerprintSync(text)
-  }
-}
 
 // Data Fetching
 const fetchRcaList = async () => {
@@ -437,14 +359,28 @@ const fetchCapaList = async (arNo) => {
   }
 }
 
-const onArSelected = () => {
+const selectRca = (rca) => {
+  showDetailModal.value = true
+  selectedArNo.value = rca.ar_no
   successBanner.value = ''
   errorBanner.value = ''
   selectedRcaHeader.value = null
   capaList.value = []
-  if (selectedArNo.value) {
-    fetchRcaHeader(selectedArNo.value)
-    fetchCapaList(selectedArNo.value)
+  fetchRcaHeader(rca.ar_no)
+  fetchCapaList(rca.ar_no)
+}
+
+const closeRcaSelection = () => {
+  showDetailModal.value = false
+  selectedArNo.value = ''
+  selectedRcaHeader.value = null
+  capaList.value = []
+  capaPage.value = 1
+
+  if (route.query.ar_no) {
+    const query = { ...route.query }
+    delete query.ar_no
+    router.replace({ query })
   }
 }
 
@@ -457,65 +393,34 @@ const refreshCapa = () => {
   }
 }
 
-// Modal Handlers
-const openNewCapaModal = () => {
-  capaFormError.value = ''
-  const today = new Date().toISOString().slice(0, 10)
-  newCapa.value = {
-    rc: '',
-    action_type: 'CORRECTIVE',
-    action_plan: '',
-    target_date: today,
-    pic: '',
-    status: 'OPEN'
-  }
-  showNewCapaModal.value = true
-}
 
-const submitCreateCapa = async () => {
-  capaFormError.value = ''
-
-  if (!newCapa.value.rc || !newCapa.value.action_plan || !newCapa.value.target_date || !newCapa.value.pic) {
-    capaFormError.value = 'Root Cause ID, Action Plan, Target Date, and PIC are required.'
-    return
-  }
-
-  submittingCapa.value = true
-  try {
-    const fingerprint = await generateFingerprint(newCapa.value.action_plan)
-    const targetDateIso = new Date(newCapa.value.target_date + 'T00:00:00').toISOString()
-
-    const payload = [
-      {
-        ar_no: selectedArNo.value,
-        rc: newCapa.value.rc,
-        action_type: newCapa.value.action_type,
-        action_plan: newCapa.value.action_plan,
-        target_date: targetDateIso,
-        pic: newCapa.value.pic,
-        status: newCapa.value.status,
-        fingerprint: fingerprint
-      }
-    ]
-
-    await apiClient.post(ENDPOINTS.RCA_CAPA(selectedArNo.value), payload)
-    successBanner.value = `CAPA action for ${selectedArNo.value} created successfully.`
-    showNewCapaModal.value = false
-    await fetchCapaList(selectedArNo.value)
-  } catch (err) {
-    capaFormError.value = err.message || 'Failed to create CAPA action.'
-  } finally {
-    submittingCapa.value = false
-  }
-}
-
-// Watch search to reset dropdown visibility
 watch(rcaSearch, () => {
-  // Search only filters the dropdown options, no side effects needed
+  rcaPage.value = 1
 })
 
-onMounted(() => {
-  fetchRcaList()
+watch(rcaPageSize, () => {
+  rcaPage.value = 1
+})
+
+watch(capaPageSize, () => {
+  capaPage.value = 1
+})
+
+onMounted(async () => {
+  await fetchRcaList()
+
+  const targetArNo = String(route.query.ar_no || '').trim()
+  if (!targetArNo) return
+
+  const matchedRca = rcaList.value.find(
+    r => String(r.ar_no || '').toLowerCase() === targetArNo.toLowerCase()
+  )
+
+  if (matchedRca) {
+    selectRca(matchedRca)
+  } else {
+    errorBanner.value = `RCA ${targetArNo} was not found.`
+  }
 })
 </script>
 
@@ -1157,5 +1062,71 @@ onMounted(() => {
   .form-row {
     flex-direction: column;
   }
+}
+
+/* RCA worklist */
+.rca-list-card {
+  padding: 18px 20px;
+}
+
+.rca-filter-row {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rca-search-control {
+  min-width: 280px;
+}
+
+.btn-reset {
+  white-space: nowrap;
+}
+
+.detail-close-btn {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 2px 6px;
+  line-height: 1;
+}
+
+.page-size-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.page-size-select {
+  width: auto;
+  min-width: 70px;
+  padding: 5px 8px;
+}
+
+@media (max-width: 768px) {
+  .rca-filter-row {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .rca-search-control {
+    min-width: 0;
+  }
+}
+
+
+/* Combined read-only Problem → RCA → CAPA modal */
+.detail-backdrop { padding: 24px; z-index: 1000; }
+.capa-detail-modal { width: min(1100px, 96vw); max-width: 96vw; max-height: 90vh; overflow: hidden; }
+.capa-detail-body { max-height: calc(90vh - 72px); overflow-y: auto; }
+.modal-subtitle { display:block; margin-top:3px; color:var(--text-muted); font-size:var(--font-size-xs); }
+@media (max-width: 768px) {
+  .detail-backdrop { padding: 10px; }
+  .capa-detail-modal { width:100%; max-width:100%; }
 }
 </style>

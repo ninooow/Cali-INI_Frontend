@@ -10,16 +10,11 @@
         </div>
         <h1 class="view-title">Equipment Limits</h1>
         <p class="view-subtitle">
-          Engineering thresholds, baseline limits, and operational setpoints across plant equipment.
-          Read-only — limits are managed by engineering and backend systems.
+          Review engineering thresholds and operating limits configured for each plant asset.
         </p>
       </div>
-
       <div class="header-actions">
-        <button class="btn btn-outline" @click="fetchLimits" :disabled="loading">
-          <span v-if="loading">Refreshing...</span>
-          <span v-else>↻ Refresh</span>
-        </button>
+        <button class="btn btn-primary" @click="showAddNotice">+ Add Limit</button>
       </div>
     </header>
 
@@ -53,6 +48,10 @@
       </div>
     </div>
 
+    <div v-if="actionNotice" class="action-notice">
+      {{ actionNotice }} <button class="notice-close" @click="actionNotice = ''">×</button>
+    </div>
+
     <!-- HOW: Limits List / Table -->
     <div class="card limits-card">
       <!-- Loading State -->
@@ -76,21 +75,34 @@
       <div v-else>
         <DataTable
           :columns="limitColumns"
-          :data="paginatedLimits"
+          :rows="paginatedLimits"
           :empty-message="'No equipment limits available.'"
         >
-          <template #cell-actions="{ row }">
-            <button class="btn btn-outline btn-xs" @click="openDetail(row)">
-              View Details
+          <template #item-asset_id="{ item }">
+            <span>{{ assetLabel(item.asset_id) }}</span>
+          </template>
+
+          <template #item-actions="{ item }">
+            <div class="row-actions">
+              <button class="btn btn-outline btn-xs" @click="openDetail(item)">
+              View
             </button>
+              <button class="btn btn-primary btn-xs" @click="showUpdateNotice">Update</button>
+            </div>
           </template>
         </DataTable>
 
         <!-- Pagination -->
         <div class="pagination-bar" v-if="totalPages > 1">
-          <span class="pagination-info">
-            Showing {{ ((page - 1) * PAGE_SIZE) + 1 }}–{{ Math.min(page * PAGE_SIZE, limits.length) }} of {{ limits.length }} records
-          </span>
+          <div class="pagination-left">
+            <span class="pagination-info">Showing {{ ((page - 1) * pageSize) + 1 }}–{{ Math.min(page * pageSize, limits.length) }} of {{ limits.length }} records</span>
+            <label class="page-size-control">Rows
+              <select v-model.number="pageSize" class="filter-control page-size-select">
+                <option :value="10">10</option><option :value="25">25</option>
+                <option :value="50">50</option><option :value="100">100</option>
+              </select>
+            </label>
+          </div>
           <div class="pagination-controls">
             <button
               class="btn btn-outline btn-xs"
@@ -141,7 +153,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import apiClient from '../api/client.js'
 import { ENDPOINTS } from '../api/endpoints.js'
 import DataTable from '../components/common/DataTable.vue'
@@ -152,7 +164,8 @@ const assetOptions = ref([])
 const loading = ref(false)
 const error = ref('')
 const page = ref(1)
-const PAGE_SIZE = 25
+const pageSize = ref(10)
+const actionNotice = ref('')
 
 // Contracted Filters: asset_id, parameter
 const filters = ref({
@@ -167,7 +180,7 @@ const selectedLimit = ref(null)
 // Dynamic columns inferred safely from response data
 const baseColumns = [
   { key: 'limit_id', label: 'Limit ID', width: '90px' },
-  { key: 'asset_id', label: 'Asset ID', width: '90px' },
+  { key: 'asset_id', label: 'Asset', width: '190px' },
   { key: 'parameter', label: 'Parameter' },
   { key: 'unit', label: 'Unit', width: '80px' },
   { key: 'actions', label: 'Action', width: '110px' }
@@ -189,7 +202,7 @@ const limitColumns = computed(() => {
     if (keys.includes(k) && !cols.some(c => c.key === k)) {
       cols.push({
         key: k,
-        label: formatKey(k),
+        label: k === 'asset_id' ? 'Asset' : formatKey(k),
         width: k.endsWith('_id') || k === 'id' ? '90px' : k === 'unit' ? '80px' : undefined
       })
     }
@@ -208,10 +221,10 @@ const limitColumns = computed(() => {
 })
 
 // Pagination
-const totalPages = computed(() => Math.max(1, Math.ceil(limits.value.length / PAGE_SIZE)))
+const totalPages = computed(() => Math.max(1, Math.ceil(limits.value.length / pageSize.value)))
 const paginatedLimits = computed(() => {
-  const start = (page.value - 1) * PAGE_SIZE
-  return limits.value.slice(start, start + PAGE_SIZE)
+  const start = (page.value - 1) * pageSize.value
+  return limits.value.slice(start, start + pageSize.value)
 })
 
 // Debounce helper
@@ -246,26 +259,37 @@ const fetchLimits = async () => {
   loading.value = true
   error.value = ''
   try {
-    let url = ENDPOINTS.EQUIPMENT_LIMITS
     const params = {}
+    if (filters.value.asset_id) params.asset_id = filters.value.asset_id
+    if (filters.value.parameter?.trim()) params.parameter = filters.value.parameter.trim()
 
-    if (filters.value.asset_id) {
-      url = ENDPOINTS.ASSET_LIMITS(filters.value.asset_id)
-    }
-
-    if (filters.value.parameter) {
-      params.parameter = filters.value.parameter.trim()
-    }
-
-    const { data } = await apiClient.get(url, { params })
-    limits.value = Array.isArray(data) ? data : (data.data || [])
+    const { data } = await apiClient.get(ENDPOINTS.EQUIPMENT_LIMITS, { params })
+    const payload = data?.data ?? data?.items ?? data
+    limits.value = Array.isArray(payload) ? payload : []
     page.value = 1
   } catch (err) {
-    error.value = err.message || 'Failed to load equipment limits.'
+    console.error('Failed to load equipment limits:', err)
+    error.value = err.response?.data?.detail || err.message || 'Failed to load equipment limits.'
     limits.value = []
   } finally {
     loading.value = false
   }
+}
+
+const assetLabel = (assetId) => {
+  const asset = assetOptions.value.find(a => String(a.asset_id) === String(assetId))
+  if (!asset) return assetId ?? '—'
+  return asset.tag_number
+    ? `${asset.tag_number}${asset.asset_name ? ` — ${asset.asset_name}` : ''}`
+    : (asset.asset_name || assetId || '—')
+}
+
+const showAddNotice = () => {
+  actionNotice.value = 'Add Limit is not available in the current backend API contract yet.'
+}
+
+const showUpdateNotice = () => {
+  actionNotice.value = 'Update Equipment Limit is not available in the current backend API contract yet.'
 }
 
 const openDetail = (row) => {
@@ -279,9 +303,11 @@ const formatKey = (key) => {
     .replace(/\b\w/g, c => c.toUpperCase())
 }
 
-onMounted(() => {
-  fetchAssetsList()
-  fetchLimits()
+watch(pageSize, () => { page.value = 1 })
+
+onMounted(async () => {
+  await fetchAssetsList()
+  await fetchLimits()
 })
 </script>
 
@@ -305,23 +331,23 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 0.8rem;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
   margin-bottom: 6px;
 }
 
-.crumb-separator { color: var(--text-tertiary, #8b8fa3); }
-.crumb-active { color: var(--text-secondary, #b4b7c9); }
+.crumb-separator { color: var(--text-muted, #64748b); }
+.crumb-active { color: var(--text-secondary, #475569); }
 
 .view-title {
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--text-primary, #e8eaf0);
+  color: var(--text-primary, #0f2747);
   margin: 0 0 6px 0;
 }
 
 .view-subtitle {
   font-size: 0.85rem;
-  color: var(--text-secondary, #b4b7c9);
+  color: var(--text-secondary, #475569);
   margin: 0;
   max-width: 780px;
   line-height: 1.4;
@@ -334,8 +360,8 @@ onMounted(() => {
 }
 
 .card {
-  background: var(--bg-card, #161826);
-  border: 1px solid var(--border-default, #2a2d42);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dbe5f0);
   border-radius: var(--radius-lg, 12px);
   padding: var(--space-4, 16px);
 }
@@ -358,23 +384,23 @@ onMounted(() => {
 .filter-label {
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--text-secondary, #b4b7c9);
+  color: var(--text-secondary, #475569);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .filter-control {
   padding: 8px 12px;
-  background: var(--bg-input, #0f111a);
-  border: 1px solid var(--border-default, #2a2d42);
+  background: var(--surface-alt, #f7faff);
+  border: 1px solid var(--border, #dbe5f0);
   border-radius: var(--radius-md, 8px);
-  color: var(--text-primary, #e8eaf0);
+  color: var(--text-primary, #0f2747);
   font-size: 0.85rem;
 }
 
 .filter-control:focus {
   outline: none;
-  border-color: var(--primary-500, #4f8cff);
+  border-color: var(--primary-blue, #1677c8);
 }
 
 .filter-actions {
@@ -395,7 +421,7 @@ onMounted(() => {
   justify-content: center;
   gap: 12px;
   padding: 50px 20px;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
 }
 
 .state-container.error-state {
@@ -422,13 +448,13 @@ onMounted(() => {
 
 .btn-outline {
   background: transparent;
-  border: 1px solid var(--border-default, #2a2d42);
-  color: var(--text-secondary, #b4b7c9);
+  border: 1px solid var(--border, #dbe5f0);
+  color: var(--text-secondary, #475569);
 }
 
 .btn-outline:hover:not(:disabled) {
-  background: var(--bg-hover, #1e2133);
-  color: var(--text-primary, #e8eaf0);
+  background: var(--surface-alt, #f7faff);
+  color: var(--text-primary, #0f2747);
 }
 
 .btn-outline:disabled {
@@ -451,14 +477,14 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border-top: 1px solid var(--border-default, #2a2d42);
+  border-top: 1px solid var(--border, #dbe5f0);
   flex-wrap: wrap;
   gap: 10px;
 }
 
 .pagination-info {
   font-size: 0.8rem;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
 }
 
 .pagination-controls {
@@ -469,14 +495,14 @@ onMounted(() => {
 
 .page-indicator {
   font-size: 0.8rem;
-  color: var(--text-secondary, #b4b7c9);
+  color: var(--text-secondary, #475569);
 }
 
 .spinner {
   width: 28px;
   height: 28px;
-  border: 3px solid var(--border-default, #2a2d42);
-  border-top-color: var(--primary-500, #4f8cff);
+  border: 3px solid var(--border, #dbe5f0);
+  border-top-color: var(--primary-blue, #1677c8);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -496,8 +522,8 @@ onMounted(() => {
 }
 
 .modal-dialog {
-  background: var(--bg-card, #161826);
-  border: 1px solid var(--border-default, #2a2d42);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dbe5f0);
   border-radius: var(--radius-lg, 12px);
   width: 100%;
   max-width: 520px;
@@ -510,31 +536,31 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--border-default, #2a2d42);
+  border-bottom: 1px solid var(--border, #dbe5f0);
 }
 
 .modal-title {
   font-size: 1.1rem;
   font-weight: 600;
-  color: var(--text-primary, #e8eaf0);
+  color: var(--text-primary, #0f2747);
   margin: 0;
 }
 
 .modal-subtitle {
   font-size: 0.78rem;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
 }
 
 .modal-close-btn {
   background: none;
   border: none;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
   font-size: 1.3rem;
   cursor: pointer;
   padding: 4px;
 }
 
-.modal-close-btn:hover { color: var(--text-primary, #e8eaf0); }
+.modal-close-btn:hover { color: var(--text-primary, #0f2747); }
 
 .modal-body {
   padding: 20px;
@@ -552,22 +578,22 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: var(--bg-input, #0f111a);
+  background: var(--surface-alt, #f7faff);
   padding: 10px 12px;
   border-radius: var(--radius-md, 8px);
-  border: 1px solid var(--border-default, #2a2d42);
+  border: 1px solid var(--border, #dbe5f0);
 }
 
 .detail-label {
   font-size: 0.72rem;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
   text-transform: uppercase;
 }
 
 .detail-value {
   font-size: 0.85rem;
   font-weight: 500;
-  color: var(--text-primary, #e8eaf0);
+  color: var(--text-primary, #0f2747);
   word-break: break-all;
 }
 
@@ -575,6 +601,18 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   padding: 14px 20px;
-  border-top: 1px solid var(--border-default, #2a2d42);
+  border-top: 1px solid var(--border, #dbe5f0);
 }
+
+.filter-card { background:var(--surface,#fff); }
+.filter-control { background:var(--surface,#fff); color:var(--text-primary,#0f2747); }
+.row-actions { display:flex; gap:6px; white-space:nowrap; }
+.btn-primary { background:var(--primary-blue,#1677c8); color:#fff; }
+.pagination-left { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.page-size-control { display:flex; align-items:center; gap:6px; font-size:.78rem; color:var(--text-muted,#64748b); }
+.page-size-select { width:auto; min-width:68px; padding:4px 7px; }
+.action-notice { display:flex; padding:10px 14px; background:#f7faff; border:1px solid #dbe5f0; border-radius:8px; color:#475569; font-size:.82rem; }
+.notice-close { margin-left:auto; border:0; background:transparent; cursor:pointer; font-size:18px; color:inherit; }
+.modal-backdrop { background:rgba(15,39,71,.28); }
+
 </style>

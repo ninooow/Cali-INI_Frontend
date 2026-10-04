@@ -15,15 +15,41 @@
       </div>
 
       <div class="header-actions">
-        <button class="btn btn-outline" @click="fetchTelemetry" :disabled="loadingTelemetry">
-          <span v-if="loadingTelemetry">Refreshing...</span>
-          <span v-else>↻ Refresh</span>
+        <button
+          class="btn btn-outline"
+          type="button"
+          :disabled="runningAnalysis"
+          @click="runAnalysis"
+        >
+          <span v-if="runningAnalysis" class="run-btn-content">
+            <span class="run-spinner" aria-hidden="true"></span>
+            Running {{ analysisElapsedLabel }}
+          </span>
+          <span v-else>Run Analysis</span>
         </button>
-        <button class="btn btn-primary" @click="openModal">
+
+        <button class="btn btn-primary" @click="openModal" :disabled="runningAnalysis">
           <span>+ Input Data</span>
         </button>
       </div>
     </header>
+
+    <div v-if="runningAnalysis" class="analysis-running-card" role="status" aria-live="polite">
+      <div class="analysis-running-top">
+        <div class="analysis-running-copy">
+          <span class="analysis-pulse" aria-hidden="true"></span>
+          <div>
+            <strong>Analysis is running</strong>
+            <p>Processing telemetry, condition, forecast, RCA, and KPI results. This may take a few minutes.</p>
+          </div>
+        </div>
+        <span class="analysis-timer">{{ analysisElapsedLabel }}</span>
+      </div>
+      <div class="analysis-progress-track" aria-hidden="true">
+        <span class="analysis-progress-bar"></span>
+      </div>
+      <span class="analysis-running-note">Keep this page open until the analysis finishes.</span>
+    </div>
 
     <!-- Success & Error Banners -->
     <div v-if="successMessage" class="banner banner-success">
@@ -38,54 +64,41 @@
       <button class="banner-close" @click="errorMessage = ''">×</button>
     </div>
 
-    <!-- Filters Section -->
+    <!-- Compact Filters -->
     <section class="card filter-card">
-      <div class="filter-grid">
-        <div class="filter-item">
-          <label class="filter-label">Asset</label>
-          <select v-model="filterAssetId" class="filter-control" @change="fetchTelemetry">
-            <option value="">All Assets</option>
-            <option v-for="asset in assets" :key="asset.asset_id" :value="asset.asset_id">
-              {{ asset.tag_number }} — {{ asset.asset_name }}
-            </option>
-          </select>
-        </div>
+      <div class="filter-toolbar">
+        <select v-model="filterAssetId" class="filter-control" @change="applyFilters">
+          <option value="">All Assets</option>
+          <option v-for="asset in assets" :key="asset.asset_id" :value="asset.asset_id">
+            {{ asset.tag_number }} — {{ asset.asset_name }}
+          </option>
+        </select>
 
-        <div class="filter-item">
-          <label class="filter-label">Date From</label>
-          <input
-            v-model="filterDateFrom"
-            type="datetime-local"
-            class="filter-control"
-            @change="fetchTelemetry"
-          />
-        </div>
-
-        <div class="filter-item">
-          <label class="filter-label">Date To</label>
-          <input
-            v-model="filterDateTo"
-            type="datetime-local"
-            class="filter-control"
-            @change="fetchTelemetry"
-          />
-        </div>
-
-        <div class="filter-item">
-          <label class="filter-label">Run Status</label>
-          <select v-model="filterRunStatus" class="filter-control">
-            <option value="">All Statuses</option>
-            <option value="ON">ON</option>
-            <option value="OFF">OFF</option>
-            <option value="UNKNOWN">UNKNOWN</option>
-          </select>
-        </div>
-
-        <div class="filter-actions-col">
-          <button class="btn btn-outline btn-reset" @click="resetFilters">
-            Reset
+        <div class="date-range-wrap">
+          <button type="button" class="filter-control date-range-trigger" @click="showDateRange = !showDateRange">
+            {{ dateRangeLabel }}
           </button>
+          <div v-if="showDateRange" class="date-range-popover">
+            <div>
+              <label class="filter-label">Start</label>
+              <input v-model="filterDateFrom" type="datetime-local" class="filter-control" />
+            </div>
+            <span class="date-arrow">→</span>
+            <div>
+              <label class="filter-label">End</label>
+              <input v-model="filterDateTo" type="datetime-local" class="filter-control" />
+            </div>
+            <button type="button" class="btn btn-primary" @click="applyDateRange">Apply</button>
+          </div>
         </div>
+
+        <select v-model="filterRunStatus" class="filter-control" @change="applyFilters">
+          <option value="">All Statuses</option>
+          <option value="ON">ON</option>
+          <option value="OFF">OFF</option>
+        </select>
+
+        <button class="btn btn-outline btn-reset" @click="resetFilters">Reset</button>
       </div>
     </section>
 
@@ -93,14 +106,14 @@
     <section class="table-section">
       <div class="section-meta">
         <span class="record-count">
-          Showing {{ filteredTelemetry.length }} hourly measurement {{ filteredTelemetry.length === 1 ? 'record' : 'records' }}
+          Showing {{ pageStart + 1 }}–{{ Math.min(pageStart + pageSize, filteredTelemetry.length) }} of {{ filteredTelemetry.length }} records
         </span>
         <span class="sort-notice">Sorted by measured_at (DESC)</span>
       </div>
 
       <DataTable
         :columns="tableColumns"
-        :rows="filteredTelemetry"
+        :rows="paginatedTelemetry"
         :loading="loadingTelemetry"
         empty-message="No hourly measurement records found matching the filter criteria."
       >
@@ -142,12 +155,30 @@
           <span :class="['status-pill', `status-${(item.run_status || 'UNKNOWN').toLowerCase()}`]">
             {{ item.run_status || 'UNKNOWN' }}
           </span>
-        </template>
-
-        <template #item-source_type="{ item }">
-          <span class="source-tag">{{ item.source_type || 'MANUAL' }}</span>
+        </template>        <template #item-actions="{ item }">
+          <div class="row-actions">
+            <button type="button" class="action-btn" @click="showUnavailableAction('Edit', item)">Edit</button>
+            <button type="button" class="action-btn action-delete" @click="showUnavailableAction('Delete', item)">Delete</button>
+          </div>
         </template>
       </DataTable>
+
+      <div v-if="filteredTelemetry.length" class="pagination-bar">
+        <div class="page-size">
+          <span>Rows per page</span>
+          <select v-model.number="pageSize" class="filter-control page-size-select" @change="currentPage = 1">
+            <option :value="10">10</option>
+            <option :value="25">25</option>
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+          </select>
+        </div>
+        <div class="page-nav">
+          <button class="btn btn-outline page-btn" :disabled="currentPage <= 1" @click="currentPage--">Previous</button>
+          <span>Page {{ currentPage }} of {{ totalPages }}</span>
+          <button class="btn btn-outline page-btn" :disabled="currentPage >= totalPages" @click="currentPage++">Next</button>
+        </div>
+      </div>
     </section>
 
     <!-- Input Modal / Dialog -->
@@ -267,21 +298,10 @@
                 <select v-model="formData.run_status" class="form-control" required>
                   <option value="ON">ON (Operating)</option>
                   <option value="OFF">OFF (Standby / Tripped)</option>
-                  <option value="UNKNOWN">UNKNOWN</option>
                 </select>
               </div>
-
-              <div class="form-group flex-1">
-                <label class="form-label">Source Type</label>
-                <input
-                  type="text"
-                  class="form-control bg-readonly"
-                  value="MANUAL"
-                  readonly
-                />
               </div>
             </div>
-          </div>
 
           <div class="modal-footer">
             <button type="button" class="btn btn-outline" @click="closeModal" :disabled="submitting">
@@ -299,7 +319,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { apiClient } from '@/api/client'
 import { ENDPOINTS } from '@/api/endpoints'
 import DataTable from '@/components/common/DataTable.vue'
@@ -309,10 +329,16 @@ const assets = ref([])
 const telemetryRows = ref([])
 const loadingTelemetry = ref(false)
 const submitting = ref(false)
+const runningAnalysis = ref(false)
+const analysisElapsedSeconds = ref(0)
+let analysisTimerId = null
 const successMessage = ref('')
 const errorMessage = ref('')
 const formError = ref('')
 const showModal = ref(false)
+const showDateRange = ref(false)
+const currentPage = ref(1)
+const pageSize = ref(10)
 
 // Filters
 const filterAssetId = ref('')
@@ -330,8 +356,7 @@ const formData = ref({
   temp: null,
   amp: null,
   plant_rate: null,
-  run_status: 'ON',
-  source_type: 'MANUAL'
+  run_status: 'ON'
 })
 
 // Table Columns strictly matching contract
@@ -345,7 +370,7 @@ const tableColumns = [
   { key: 'amp', label: 'AMP', align: 'right', width: '9%' },
   { key: 'plant_rate', label: 'Plant Rate', align: 'right', width: '10%' },
   { key: 'run_status', label: 'Run Status', align: 'center', width: '10%' },
-  { key: 'source_type', label: 'Source', align: 'center', width: '5%' }
+  { key: 'actions', label: 'Actions', align: 'center', width: '12%' }
 ]
 
 // Filtered view
@@ -357,6 +382,53 @@ const filteredTelemetry = computed(() => {
     return true
   })
 })
+
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredTelemetry.value.length / pageSize.value)))
+const pageStart = computed(() => (currentPage.value - 1) * pageSize.value)
+const paginatedTelemetry = computed(() =>
+  filteredTelemetry.value.slice(pageStart.value, pageStart.value + pageSize.value)
+)
+const dateRangeLabel = computed(() => {
+  if (!filterDateFrom.value && !filterDateTo.value) return 'Date Range'
+  const fmt = (value) => value ? new Date(value).toLocaleDateString('en-GB') : '…'
+  return `${fmt(filterDateFrom.value)} → ${fmt(filterDateTo.value)}`
+})
+
+const analysisElapsedLabel = computed(() => {
+  const minutes = Math.floor(analysisElapsedSeconds.value / 60)
+  const seconds = analysisElapsedSeconds.value % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+})
+
+const startAnalysisTimer = () => {
+  analysisElapsedSeconds.value = 0
+  if (analysisTimerId) clearInterval(analysisTimerId)
+  analysisTimerId = setInterval(() => {
+    analysisElapsedSeconds.value += 1
+  }, 1000)
+}
+
+const stopAnalysisTimer = () => {
+  if (analysisTimerId) {
+    clearInterval(analysisTimerId)
+    analysisTimerId = null
+  }
+}
+
+const applyFilters = () => {
+  currentPage.value = 1
+  fetchTelemetry()
+}
+
+const applyDateRange = () => {
+  showDateRange.value = false
+  applyFilters()
+}
+
+const showUnavailableAction = (action) => {
+  successMessage.value = ''
+  errorMessage.value = `${action} is not available yet because the telemetry API does not provide an ${action.toLowerCase()} endpoint.`
+}
 
 // Helper functions
 const getAssetTag = (assetId) => {
@@ -390,6 +462,8 @@ const resetFilters = () => {
   filterDateFrom.value = ''
   filterDateTo.value = ''
   filterRunStatus.value = ''
+  currentPage.value = 1
+  showDateRange.value = false
   fetchTelemetry()
 }
 
@@ -438,8 +512,7 @@ const openModal = () => {
     temp: null,
     amp: null,
     plant_rate: null,
-    run_status: 'ON',
-    source_type: 'MANUAL'
+    run_status: 'ON'
   }
   showModal.value = true
 }
@@ -447,6 +520,40 @@ const openModal = () => {
 const closeModal = () => {
   if (!submitting.value) {
     showModal.value = false
+  }
+}
+
+// Analysis execution
+const runAnalysis = async () => {
+  if (runningAnalysis.value) return
+
+  runningAnalysis.value = true
+  startAnalysisTimer()
+  successMessage.value = ''
+  errorMessage.value = ''
+
+  try {
+    const res = await apiClient.post(
+      ENDPOINTS.ANALYTICS_RUNS,
+      {},
+      { timeout: 360000 }
+    )
+
+    const run = res.data || {}
+
+    if (run.status === 'COMPLETED') {
+      successMessage.value = `Analysis completed successfully (Run #${run.run_id}). Dashboard analytics and forecasts are now updated.`
+    } else {
+      successMessage.value = `Analysis request finished with status: ${run.status || 'UNKNOWN'}.`
+    }
+  } catch (err) {
+    errorMessage.value =
+      err.response?.data?.detail ||
+      err.message ||
+      'Failed to run analysis.'
+  } finally {
+    stopAnalysisTimer()
+    runningAnalysis.value = false
   }
 }
 
@@ -476,8 +583,7 @@ const submitForm = async () => {
         temp: formData.value.temp !== null && formData.value.temp !== '' ? Number(formData.value.temp) : null,
         amp: formData.value.amp !== null && formData.value.amp !== '' ? Number(formData.value.amp) : null,
         plant_rate: formData.value.plant_rate !== null && formData.value.plant_rate !== '' ? Number(formData.value.plant_rate) : null,
-        run_status: formData.value.run_status || 'ON',
-        source_type: 'MANUAL'
+        run_status: formData.value.run_status || 'ON'
       }
     ]
 
@@ -496,6 +602,10 @@ const submitForm = async () => {
 onMounted(async () => {
   await fetchAssets()
   await fetchTelemetry()
+})
+
+onUnmounted(() => {
+  stopAnalysisTimer()
 })
 </script>
 
@@ -552,6 +662,114 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* Analysis running feedback */
+.run-btn-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.run-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: runSpin .7s linear infinite;
+}
+
+.analysis-running-card {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.analysis-running-top,
+.analysis-running-copy {
+  display: flex;
+  align-items: center;
+}
+
+.analysis-running-top {
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.analysis-running-copy {
+  gap: 12px;
+  min-width: 0;
+}
+
+.analysis-running-copy strong {
+  display: block;
+  color: var(--primary-dark);
+  font-size: var(--font-size-sm);
+}
+
+.analysis-running-copy p,
+.analysis-running-note {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.analysis-running-copy p { margin: 2px 0 0; }
+
+.analysis-pulse {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 50%;
+  background: var(--primary-blue);
+  animation: analysisPulse 1.3s ease-in-out infinite;
+}
+
+.analysis-timer {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--primary-blue);
+  font-size: var(--font-size-sm);
+}
+
+.analysis-progress-track {
+  height: 4px;
+  margin: 12px 0 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-alt);
+}
+
+.analysis-progress-bar {
+  display: block;
+  width: 34%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary-blue);
+  animation: analysisProgress 1.6s ease-in-out infinite;
+}
+
+.analysis-running-note { display: block; }
+
+@keyframes runSpin { to { transform: rotate(360deg); } }
+@keyframes analysisPulse {
+  0%, 100% { opacity: .35; transform: scale(.8); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+@keyframes analysisProgress {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(300%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-spinner, .analysis-pulse, .analysis-progress-bar { animation: none; }
+}
+
+@media (max-width: 640px) {
+  .analysis-running-top { align-items: flex-start; }
+  .analysis-running-copy p { line-height: 1.4; }
 }
 
 /* Banners */
@@ -860,4 +1078,41 @@ onMounted(async () => {
   border-top: 1px solid var(--border);
   background-color: var(--surface-alt);
 }
+
+/* Compact filter toolbar */
+.filter-card { padding: 10px 12px; overflow: visible; }
+.filter-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filter-toolbar > .filter-control { width: auto; min-width: 150px; }
+.date-range-wrap { position: relative; }
+.date-range-trigger { min-width: 190px; text-align: left; cursor: pointer; }
+.date-range-popover {
+  position: absolute; z-index: 50; top: calc(100% + 8px); left: 0;
+  display: flex; align-items: flex-end; gap: 10px;
+  padding: 12px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-hover);
+  white-space: nowrap;
+}
+.date-range-popover > div { display: flex; flex-direction: column; gap: 5px; }
+.date-arrow { padding-bottom: 9px; color: var(--text-muted); }
+.row-actions { display: flex; justify-content: center; gap: 6px; }
+.action-btn {
+  border: 1px solid var(--border); background: var(--surface); color: var(--primary-blue);
+  border-radius: var(--radius-sm); padding: 4px 8px; cursor: pointer; font-size: 12px; font-weight: 600;
+}
+.action-btn:hover { background: var(--surface-alt); }
+.action-delete { color: var(--priority-p1); }
+.pagination-bar {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding-top: 4px; font-size: var(--font-size-xs); color: var(--text-secondary);
+}
+.page-size, .page-nav { display: flex; align-items: center; gap: 8px; }
+.page-size-select { min-width: 68px; padding: 5px 8px; }
+.page-btn { padding: 5px 10px; }
+.page-btn:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 760px) {
+  .date-range-popover { flex-direction: column; align-items: stretch; white-space: normal; }
+  .date-arrow { display: none; }
+  .pagination-bar { align-items: flex-start; flex-direction: column; }
+}
+
 </style>

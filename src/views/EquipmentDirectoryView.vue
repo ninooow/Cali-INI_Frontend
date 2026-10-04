@@ -8,18 +8,12 @@
           <span class="crumb-separator">/</span>
           <span class="crumb-active">Equipment Directory</span>
         </div>
-        <h1 class="view-title">Equipment Directory</h1>
-        <p class="view-subtitle">
-          Master register of plant equipment with taxonomy, discipline, and criticality classification.
-          Read-only — asset data is managed by the backend system.
-        </p>
+        <h1 class="view-title">Asset Directory</h1>
+        <p class="view-subtitle">View and manage registered plant equipment and asset information.</p>
       </div>
 
       <div class="header-actions">
-        <button class="btn btn-outline" @click="fetchAssets" :disabled="loading">
-          <span v-if="loading">Refreshing...</span>
-          <span v-else>↻ Refresh</span>
-        </button>
+        <button class="btn btn-primary" @click="showUnavailable('Create')">+ Add Asset</button>
       </div>
     </header>
 
@@ -54,16 +48,6 @@
         </div>
 
         <div class="filter-group">
-          <label class="filter-label">Criticality</label>
-          <select v-model="filters.criticality" class="filter-control" @change="fetchAssets">
-            <option value="">All</option>
-            <option value="HIGH">HIGH</option>
-            <option value="MEDIUM">MEDIUM</option>
-            <option value="LOW">LOW</option>
-          </select>
-        </div>
-
-        <div class="filter-group">
           <label class="filter-label">Status</label>
           <select v-model="filters.is_active" class="filter-control" @change="fetchAssets">
             <option value="">All</option>
@@ -73,9 +57,15 @@
         </div>
 
         <div class="filter-group filter-actions">
-          <button class="btn btn-sm btn-outline" @click="clearFilters">Clear Filters</button>
+          <button class="btn btn-sm btn-outline" @click="clearFilters">Reset</button>
         </div>
       </div>
+    </div>
+
+
+    <div v-if="actionNotice" class="action-notice">
+      {{ actionNotice }}
+      <button class="banner-close" @click="actionNotice = ''">×</button>
     </div>
 
     <!-- HOW: Asset Table -->
@@ -104,21 +94,32 @@
           </button>
         </template>
 
-        <template #item-criticality="{ item }">
-          <span :class="['criticality-badge', `crit-${(item.criticality || 'LOW').toLowerCase()}`]">
-            {{ item.criticality || '—' }}
-          </span>
-        </template>
-
         <template #item-is_active="{ item }">
           <span :class="['status-dot', item.is_active ? 'dot-active' : 'dot-inactive']">
             {{ item.is_active ? 'Active' : 'Inactive' }}
           </span>
         </template>
+
+        <template #item-actions="{ item }">
+          <div class="row-actions">
+            <button class="btn btn-outline btn-sm" @click="openDetailModal(item.asset_id)">View</button>
+            <button class="btn btn-outline btn-sm" @click="showUnavailable('Update')">Edit</button>
+            <button class="btn btn-danger btn-sm" @click="showUnavailable('Delete')">Delete</button>
+          </div>
+        </template>
       </DataTable>
 
       <!-- Pagination -->
-      <div v-if="totalPages > 1" class="pagination-bar">
+      <div v-if="assets.length" class="pagination-bar">
+        <label class="page-size-control">
+          Rows
+          <select v-model.number="pageSize" class="filter-control page-size-select">
+            <option :value="10">10</option>
+            <option :value="25">25</option>
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+          </select>
+        </label>
         <button class="btn btn-outline btn-sm" :disabled="page <= 1" @click="page--">← Prev</button>
         <span class="page-info">Page {{ page }} of {{ totalPages }}</span>
         <button class="btn btn-outline btn-sm" :disabled="page >= totalPages" @click="page++">Next →</button>
@@ -175,12 +176,6 @@
               <span class="detail-value">{{ detailAsset.discipline || '—' }}</span>
             </div>
             <div class="detail-field">
-              <label class="detail-label">Criticality</label>
-              <span :class="['criticality-badge', `crit-${(detailAsset.criticality || 'LOW').toLowerCase()}`]">
-                {{ detailAsset.criticality || '—' }}
-              </span>
-            </div>
-            <div class="detail-field">
               <label class="detail-label">Status</label>
               <span :class="['status-dot', detailAsset.is_active ? 'dot-active' : 'dot-inactive']">
                 {{ detailAsset.is_active ? 'Active' : 'Inactive' }}
@@ -197,7 +192,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import apiClient from '../api/client.js'
 import { ENDPOINTS } from '../api/endpoints.js'
 import DataTable from '../components/common/DataTable.vue'
@@ -207,14 +202,14 @@ const assets = ref([])
 const loading = ref(false)
 const error = ref('')
 const page = ref(1)
-const PAGE_SIZE = 25
+const pageSize = ref(10)
+const actionNotice = ref('')
 
 // Filters (contract §4.1: search, plant, equipment_type, criticality, is_active)
 const filters = ref({
   search: '',
   plant: '',
   equipment_type: '',
-  criticality: '',
   is_active: ''
 })
 
@@ -236,15 +231,15 @@ const assetColumns = [
   { key: 'equipment_class', label: 'Class', width: '100px' },
   { key: 'plant_code', label: 'Plant', width: '80px' },
   { key: 'discipline', label: 'Discipline', width: '110px' },
-  { key: 'criticality', label: 'Criticality', width: '100px' },
-  { key: 'is_active', label: 'Status', width: '90px' }
+  { key: 'is_active', label: 'Status', width: '90px' },
+  { key: 'actions', label: 'Actions', align: 'right', width: '210px' }
 ]
 
 // Pagination (client-side per contract §11)
-const totalPages = computed(() => Math.max(1, Math.ceil(assets.value.length / PAGE_SIZE)))
+const totalPages = computed(() => Math.max(1, Math.ceil(assets.value.length / pageSize.value)))
 const paginatedAssets = computed(() => {
-  const start = (page.value - 1) * PAGE_SIZE
-  return assets.value.slice(start, start + PAGE_SIZE)
+  const start = (page.value - 1) * pageSize.value
+  return assets.value.slice(start, start + pageSize.value)
 })
 
 // Debounce timer for search
@@ -266,7 +261,6 @@ const fetchAssets = async () => {
     if (filters.value.search) params.search = filters.value.search
     if (filters.value.plant) params.plant = filters.value.plant
     if (filters.value.equipment_type) params.equipment_type = filters.value.equipment_type
-    if (filters.value.criticality) params.criticality = filters.value.criticality
     if (filters.value.is_active !== '') params.is_active = filters.value.is_active
 
     const { data } = await apiClient.get(ENDPOINTS.ASSETS, { params })
@@ -314,9 +308,15 @@ const openDetailModal = async (assetId) => {
 }
 
 const clearFilters = () => {
-  filters.value = { search: '', plant: '', equipment_type: '', criticality: '', is_active: '' }
+  filters.value = { search: '', plant: '', equipment_type: '', is_active: '' }
   fetchAssets()
 }
+
+const showUnavailable = (action) => {
+  actionNotice.value = `${action} Asset is not available in the current backend API contract.`
+}
+
+watch(pageSize, () => { page.value = 1 })
 
 onMounted(fetchAssets)
 </script>
@@ -341,20 +341,20 @@ onMounted(fetchAssets)
   align-items: center;
   gap: 6px;
   font-size: 0.8rem;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
   margin-bottom: 4px;
 }
 .crumb-separator { opacity: 0.5; }
-.crumb-active { color: var(--text-secondary, #c1c4d0); }
+.crumb-active { color: var(--text-secondary, #475569); }
 .view-title {
   font-size: 1.65rem;
   font-weight: 700;
-  color: var(--text-primary, #e8eaf0);
+  color: var(--text-primary, #0f2747);
   margin: 0;
 }
 .view-subtitle {
   font-size: 0.88rem;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
   margin: 4px 0 0 0;
   max-width: 640px;
   line-height: 1.4;
@@ -369,8 +369,8 @@ onMounted(fetchAssets)
 
 /* Cards */
 .card {
-  background: var(--surface-card, #1a1c2e);
-  border: 1px solid var(--border-default, #2a2d42);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dbe5f0);
   border-radius: var(--radius-lg, 12px);
   padding: var(--space-5, 20px);
 }
@@ -395,22 +395,22 @@ onMounted(fetchAssets)
 .filter-label {
   font-size: 0.72rem;
   font-weight: 600;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
   text-transform: uppercase;
   letter-spacing: 0.6px;
 }
 .filter-control {
   padding: 8px 12px;
-  border: 1px solid var(--border-default, #2a2d42);
+  border: 1px solid var(--border, #dbe5f0);
   border-radius: var(--radius-md, 8px);
-  background: var(--surface-inset, #12131f);
-  color: var(--text-primary, #e8eaf0);
+  background: var(--surface-alt, #f7faff);
+  color: var(--text-primary, #0f2747);
   font-size: 0.85rem;
   transition: border-color 0.2s;
 }
 .filter-control:focus {
   outline: none;
-  border-color: var(--primary-500, #4f8cff);
+  border-color: var(--primary-blue, #1677c8);
 }
 .filter-actions {
   justify-content: flex-end;
@@ -425,18 +425,18 @@ onMounted(fetchAssets)
   justify-content: space-between;
   align-items: center;
   padding: var(--space-4, 16px) var(--space-5, 20px);
-  border-bottom: 1px solid var(--border-default, #2a2d42);
+  border-bottom: 1px solid var(--border, #dbe5f0);
 }
 .card-section-title {
   font-size: 1rem;
   font-weight: 600;
-  color: var(--text-primary, #e8eaf0);
+  color: var(--text-primary, #0f2747);
   margin: 0;
 }
 .record-count {
   font-weight: 400;
   font-size: 0.82rem;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
 }
 
 /* Error Banner */
@@ -495,7 +495,7 @@ onMounted(fetchAssets)
 .link-btn {
   background: none;
   border: none;
-  color: var(--primary-400, #6ba3ff);
+  color: var(--primary-blue, #1677c8);
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: 0.83rem;
   cursor: pointer;
@@ -505,7 +505,7 @@ onMounted(fetchAssets)
   transition: text-decoration-color 0.15s;
 }
 .link-btn:hover {
-  text-decoration-color: var(--primary-400, #6ba3ff);
+  text-decoration-color: var(--primary-blue, #1677c8);
 }
 
 /* Pagination */
@@ -515,11 +515,11 @@ onMounted(fetchAssets)
   justify-content: center;
   gap: 14px;
   padding: 14px var(--space-5, 20px);
-  border-top: 1px solid var(--border-default, #2a2d42);
+  border-top: 1px solid var(--border, #dbe5f0);
 }
 .page-info {
   font-size: 0.82rem;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
 }
 
 /* Buttons */
@@ -537,16 +537,16 @@ onMounted(fetchAssets)
 }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary {
-  background: var(--primary-500, #4f8cff);
+  background: var(--primary-blue, #1677c8);
   color: #fff;
 }
-.btn-primary:hover:not(:disabled) { background: var(--primary-600, #3a75e0); }
+.btn-primary:hover:not(:disabled) { background: var(--primary-dark, #0c4f8a); }
 .btn-outline {
   background: transparent;
-  border: 1px solid var(--border-default, #2a2d42);
-  color: var(--text-secondary, #c1c4d0);
+  border: 1px solid var(--border, #dbe5f0);
+  color: var(--text-secondary, #475569);
 }
-.btn-outline:hover:not(:disabled) { border-color: var(--text-tertiary, #8b8fa3); }
+.btn-outline:hover:not(:disabled) { border-color: var(--text-muted, #64748b); }
 .btn-sm { padding: 5px 12px; font-size: 0.78rem; }
 
 /* Modal */
@@ -561,8 +561,8 @@ onMounted(fetchAssets)
   backdrop-filter: blur(4px);
 }
 .modal-container {
-  background: var(--surface-card, #1a1c2e);
-  border: 1px solid var(--border-default, #2a2d42);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dbe5f0);
   border-radius: var(--radius-lg, 12px);
   width: 90%;
   max-width: 540px;
@@ -576,29 +576,29 @@ onMounted(fetchAssets)
   justify-content: space-between;
   align-items: center;
   padding: var(--space-5, 20px);
-  border-bottom: 1px solid var(--border-default, #2a2d42);
+  border-bottom: 1px solid var(--border, #dbe5f0);
 }
 .modal-title {
   font-size: 1.1rem;
   font-weight: 700;
-  color: var(--text-primary, #e8eaf0);
+  color: var(--text-primary, #0f2747);
   margin: 0;
 }
 .modal-subtitle {
   font-weight: 400;
   font-size: 0.9rem;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
 }
 .modal-close-btn {
   background: none;
   border: none;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
   font-size: 1.4rem;
   cursor: pointer;
   padding: 4px;
   line-height: 1;
 }
-.modal-close-btn:hover { color: var(--text-primary, #e8eaf0); }
+.modal-close-btn:hover { color: var(--text-primary, #0f2747); }
 .modal-body {
   padding: var(--space-5, 20px);
 }
@@ -607,7 +607,7 @@ onMounted(fetchAssets)
   justify-content: flex-end;
   gap: 10px;
   padding: var(--space-4, 16px) var(--space-5, 20px);
-  border-top: 1px solid var(--border-default, #2a2d42);
+  border-top: 1px solid var(--border, #dbe5f0);
 }
 .modal-loading {
   display: flex;
@@ -615,7 +615,7 @@ onMounted(fetchAssets)
   align-items: center;
   gap: 12px;
   padding: 40px 0;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
 }
 .modal-error-alert {
   padding: 12px 16px;
@@ -630,8 +630,8 @@ onMounted(fetchAssets)
 .spinner {
   width: 28px;
   height: 28px;
-  border: 3px solid var(--border-default, #2a2d42);
-  border-top-color: var(--primary-500, #4f8cff);
+  border: 3px solid var(--border, #dbe5f0);
+  border-top-color: var(--primary-blue, #1677c8);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -651,15 +651,39 @@ onMounted(fetchAssets)
 .detail-label {
   font-size: 0.72rem;
   font-weight: 600;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
   text-transform: uppercase;
   letter-spacing: 0.6px;
 }
 .detail-value {
   font-size: 0.92rem;
-  color: var(--text-primary, #e8eaf0);
+  color: var(--text-primary, #0f2747);
 }
 .mono-code {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
 }
+
+/* Light, compact controls */
+.filter-card { background: var(--surface, #fff); }
+.filter-bar { align-items: flex-end; gap: 10px; }
+.filter-group { min-width: 150px; flex: 1 1 170px; }
+.filter-actions { flex: 0 0 auto; }
+.filter-control {
+  background: var(--surface, #fff);
+  color: var(--text-primary, #0f2747);
+  border-color: var(--border, #dbe5f0);
+}
+.row-actions { display: flex; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+.btn-danger { background: #fff; color: #b42318; border: 1px solid #f1b8b3; }
+.btn-danger:hover { background: #fff5f4; }
+.page-size-control { display:flex; align-items:center; gap:8px; font-size:.78rem; color:var(--text-muted,#64748b); }
+.page-size-select { width:auto; min-width:70px; padding:5px 8px; }
+.action-notice {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 14px; border:1px solid var(--border,#dbe5f0);
+  border-radius:8px; background:var(--surface-alt,#f7faff);
+  color:var(--text-secondary,#475569); font-size:.82rem;
+}
+.banner-close { margin-left:auto; border:0; background:transparent; cursor:pointer; font-size:18px; color:inherit; }
+
 </style>

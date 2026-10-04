@@ -36,7 +36,7 @@ export const ENDPOINTS = {
   USERS: '/users',
   USER_BY_ID: (id) => `/users/${id}`,
 
-  // Analytics Domain (Read-Only)
+  // Analytics Domain
   ANALYTICS_RUNS: '/analytics/runs',
   ANALYTICS_RUN_LATEST: '/analytics/runs/latest',
   ANALYTICS_RUN_BY_ID: (id) => `/analytics/runs/${id}`,

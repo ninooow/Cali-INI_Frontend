@@ -8,19 +8,15 @@
           <span class="crumb-separator">/</span>
           <span class="crumb-active">Problem Verification</span>
         </div>
-        <h1 class="view-title">Operations — Problem Verification</h1>
+        <h1 class="view-title">Problem Verification</h1>
         <p class="view-subtitle">
           Human-in-the-loop engineering verification of analytical condition detections and RCA hypotheses.
         </p>
       </div>
-
       <div class="header-actions">
         <button class="btn btn-outline" @click="fetchTickets" :disabled="loadingTickets">
           <span v-if="loadingTickets">Refreshing...</span>
           <span v-else>↻ Refresh</span>
-        </button>
-        <button class="btn btn-primary" @click="openCreateModal">
-          <span>+ New Ticket</span>
         </button>
       </div>
     </header>
@@ -39,14 +35,14 @@
     </div>
 
     <!-- Hierarchy 1: WHAT — Operational Problem Worklist -->
-    <div class="workspace-grid">
+    <div class="workspace-grid" :class="{ 'has-selection': selectedTicket }">
       <!-- Left Column: Tickets Worklist & Filters -->
       <section class="worklist-pane">
         <!-- Filter Bar -->
         <div class="card filter-card">
           <div class="filter-header">
             <span class="filter-title">FILTER TICKETS</span>
-            <button class="btn-link" @click="resetFilters">Reset</button>
+            <button class="btn btn-outline btn-reset" @click="resetFilters">Reset</button>
           </div>
           <div class="filter-controls-row">
             <select v-model="filterAssetId" class="filter-select">
@@ -58,17 +54,15 @@
 
             <select v-model="filterPriority" class="filter-select">
               <option value="">All Priorities</option>
-              <option value="P1">P1 — Critical</option>
-              <option value="P2">P2 — Urgent</option>
-              <option value="P3">P3 — Elevated</option>
-              <option value="P4">P4 — Advisory</option>
+              <option value="P1">P1</option>
+              <option value="P2">P2</option>
+              <option value="P3">P3</option>
+              <option value="P4">P4</option>
             </select>
 
             <select v-model="filterTicketState" class="filter-select">
               <option value="">All States</option>
               <option value="OPEN">OPEN</option>
-              <option value="IN_PROGRESS">IN_PROGRESS</option>
-              <option value="RESOLVED">RESOLVED</option>
               <option value="CLOSED">CLOSED</option>
             </select>
           </div>
@@ -78,7 +72,7 @@
         <div class="tickets-table-card">
           <DataTable
             :columns="ticketTableColumns"
-            :rows="filteredTickets"
+            :rows="paginatedTickets"
             :loading="loadingTickets"
             empty-message="No problem tickets match the current filters."
           >
@@ -109,42 +103,47 @@
               <StatusBadge :value="item.ticket_state || 'OPEN'" type="ticket" />
             </template>
 
-            <template #item-action_status="{ item }">
-              <span class="action-status-tag">{{ formatActionStatus(item.action_status) }}</span>
-            </template>
-
             <template #item-actions="{ item }">
               <button
                 class="btn btn-sm"
                 :class="selectedTicket?.ticket_id === item.ticket_id ? 'btn-primary' : 'btn-outline'"
                 @click.stop="selectTicket(item.ticket_id)"
               >
-                {{ selectedTicket?.ticket_id === item.ticket_id ? 'Selected' : 'Review' }}
+                {{ (item.ticket_state || 'OPEN').toUpperCase() === 'CLOSED' ? 'View' : (selectedTicket?.ticket_id === item.ticket_id ? 'Selected' : 'Review') }}
               </button>
             </template>
           </DataTable>
+
+          <div v-if="filteredTickets.length" class="pagination-bar">
+            <div class="page-size">
+              <span>Rows per page</span>
+              <select v-model.number="pageSize" class="filter-select page-size-select" @change="currentPage = 1">
+                <option :value="10">10</option>
+                <option :value="25">25</option>
+                <option :value="50">50</option>
+                <option :value="100">100</option>
+              </select>
+            </div>
+            <div class="page-nav">
+              <button class="btn btn-outline page-btn" :disabled="currentPage <= 1" @click="currentPage--">Previous</button>
+              <span>Page {{ currentPage }} of {{ totalPages }} · {{ filteredTickets.length }} records</span>
+              <button class="btn btn-outline page-btn" :disabled="currentPage >= totalPages" @click="currentPage++">Next</button>
+            </div>
+          </div>
         </div>
       </section>
 
       <!-- Right Column: WHY & HOW — Problem Workspace (Detail, Verification, History) -->
-      <section class="detail-pane">
-        <!-- When no ticket is selected -->
-        <div v-if="!selectedTicket && !loadingDetail" class="card empty-workspace">
-          <div class="empty-workspace-content">
-            <span class="empty-icon-large">📋</span>
-            <h3>No Problem Ticket Selected</h3>
-            <p>Select a ticket from the operational worklist on the left to inspect evidence, submit field verifications, and review audit history.</p>
-          </div>
-        </div>
+      <section v-if="selectedTicket || loadingDetail" class="detail-pane">
 
         <!-- Detail Loading State -->
-        <div v-else-if="loadingDetail" class="card loading-workspace">
+        <div v-if="loadingDetail" class="card loading-workspace">
           <div class="spinner"></div>
-          <span>Loading ticket details and audit logs...</span>
+          <span>Loading ticket details...</span>
         </div>
 
         <!-- Selected Ticket Workspace -->
-        <div v-else-if="selectedTicket" class="workspace-card card">
+        <div v-else class="workspace-card card">
           <!-- Workspace Header -->
           <div class="workspace-header">
             <div class="workspace-header-top">
@@ -153,7 +152,10 @@
                 <StatusBadge :value="selectedTicket.condition_state" type="condition" />
                 <StatusBadge :value="selectedTicket.ticket_state" type="ticket" />
               </div>
-              <span class="source-stamp">Origin: {{ selectedTicket.update_source || 'ENGINE' }}</span>
+              <div class="workspace-header-actions">
+                <span class="source-stamp">Origin: {{ selectedTicket.update_source || 'ENGINE' }}</span>
+                <button type="button" class="workspace-close" title="Close detail" @click="closeTicket">×</button>
+              </div>
             </div>
             <h2 class="ws-ticket-id">{{ selectedTicket.ticket_id }}</h2>
             <div class="ws-meta-row">
@@ -171,72 +173,92 @@
             </div>
           </div>
 
-          <!-- Navigation Tabs: [ Verification ] | [ Evidence & RCA ] | [ History / Audit ] -->
+          <!-- Evidence first, then Verification -->
           <div class="workspace-tabs">
-            <button
-              class="ws-tab-btn"
-              :class="{ active: activeTab === 'verification' }"
-              @click="activeTab = 'verification'"
-            >
-              1. Verification & Action
-            </button>
             <button
               class="ws-tab-btn"
               :class="{ active: activeTab === 'evidence' }"
               @click="activeTab = 'evidence'"
             >
-              2. Analytical Evidence (WHY)
+              1. Analytical Evidence
             </button>
             <button
               class="ws-tab-btn"
-              :class="{ active: activeTab === 'history' }"
-              @click="activeTab = 'history'"
+              :class="{ active: activeTab === 'verification' }"
+              @click="activeTab = 'verification'"
             >
-              3. History & Audit Log ({{ auditLogs.length }})
+              2. Verification & Action
             </button>
           </div>
 
-          <!-- TAB 1: Verification & Action Form (HOW) -->
+          <!-- TAB 1: Analytical Evidence -->
+          <div v-show="activeTab === 'evidence'" class="tab-panel">
+            <div class="evidence-box">
+              <div class="evidence-banner">
+                <span class="info-label">Read-Only Engine Provenance</span>
+                <span class="info-sub">Generated by analytical engine; immutable via frontend</span>
+              </div>
+              <div class="evidence-grid">
+                <div class="evidence-item">
+                  <span class="ev-label">Condition State</span>
+                  <StatusBadge :value="selectedTicket.condition_state" type="condition" />
+                </div>
+                <div class="evidence-item">
+                  <span class="ev-label">Analytical Priority</span>
+                  <StatusBadge :value="selectedTicket.priority" type="priority" />
+                </div>
+                <div class="evidence-item">
+                  <span class="ev-label">Matched RCA AR Number</span>
+                  <button
+                    v-if="selectedTicket.matched_rca_ar"
+                    type="button"
+                    class="rca-link-btn"
+                    @click="goToCapa(selectedTicket.matched_rca_ar)"
+                  >
+                    {{ selectedTicket.matched_rca_ar }} →
+                  </button>
+                  <span v-else class="ev-value">None</span>
+                </div>
+                <div class="evidence-item">
+                  <span class="ev-label">Evidence Strength</span>
+                  <span class="badge badge-watch">{{ selectedTicket.evidence_strength || 'MODERATE' }}</span>
+                </div>
+                <div class="evidence-item evidence-item-wide">
+                  <span class="ev-label">Why was this problem raised? (Problem)</span>
+                  <span class="ev-value evidence-text">{{ problemReason }}</span>
+                </div>
+                <div class="evidence-item evidence-item-wide">
+                  <span class="ev-label">Root-cause analysis indication (RCA)</span>
+                  <span class="ev-value evidence-text">{{ rcaIndication }}</span>
+                </div>
+                <div class="evidence-item evidence-item-wide">
+                  <span class="ev-label">Last Observation Time</span>
+                  <span class="ev-value">{{ formatTime(selectedTicket.last_observation_time) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 2: Verification & Action -->
           <div v-show="activeTab === 'verification'" class="tab-panel">
             <form @submit.prevent="submitVerification">
               <div class="action-grid">
                 <div class="form-group">
                   <label class="form-label required">Operator Decision</label>
-                  <select v-model="actionForm.operator_decision" class="form-control" required>
-                    <option value="CONFIRMED">CONFIRMED (Physical verification confirmed anomaly)</option>
-                    <option value="MONITOR">MONITOR (Keep observing, no immediate trip risk)</option>
-                    <option value="FALSE_ALARM">FALSE_ALARM (Instrument glitch / transient spike)</option>
+                  <select v-model="actionForm.operator_decision" class="form-control" :disabled="isClosed" required>
+                    <option value="CONFIRMED">CONFIRMED</option>
+                    <option v-if="isClosed && actionForm.operator_decision === 'MONITOR'" value="MONITOR">MONITOR</option>
+                    <option value="FALSE_ALARM">FALSE ALARM</option>
                   </select>
                 </div>
-
-                <div class="form-group">
-                  <label class="form-label required">Ticket State</label>
-                  <select v-model="actionForm.ticket_state" class="form-control" required>
-                    <option value="OPEN">OPEN</option>
-                    <option value="IN_PROGRESS">IN_PROGRESS</option>
-                    <option value="RESOLVED">RESOLVED</option>
-                    <option value="CLOSED">CLOSED</option>
-                  </select>
-                </div>
-
-                <div class="form-group">
-                  <label class="form-label required">Action Status</label>
-                  <select v-model="actionForm.action_status" class="form-control" required>
-                    <option value="NOT_STARTED">NOT_STARTED</option>
-                    <option value="INVESTIGATING">INVESTIGATING</option>
-                    <option value="ACTION_TAKEN">ACTION_TAKEN</option>
-                    <option value="MONITORING">MONITORING</option>
-                    <option value="COMPLETED">COMPLETED</option>
-                  </select>
-                </div>
-
                 <div class="form-group">
                   <label class="form-label required">Reviewer Name</label>
                   <input
                     v-model="actionForm.last_operator_name"
                     type="text"
+                    :disabled="isClosed"
                     class="form-control"
-                    placeholder="e.g. Rian Kusuma"
+                    placeholder="Reviewer name"
                     required
                   />
                 </div>
@@ -246,223 +268,53 @@
                 <label class="form-label">Field Observation & Physical Symptoms</label>
                 <textarea
                   v-model="actionForm.field_observation"
+                  :disabled="isClosed"
                   rows="3"
                   class="form-control"
-                  placeholder="Record observations (e.g. Acoustic emission from inboard bearing, mechanical seal temperature, local gauge readings...)"
+                  placeholder="Record field observations and physical symptoms..."
                 ></textarea>
               </div>
 
               <div class="form-group mt-3">
-                <label class="form-label">Operator Notes / Comment</label>
+                <label class="form-label">Operator Notes</label>
                 <textarea
                   v-model="actionForm.operator_comment"
+                  :disabled="isClosed"
                   rows="2"
                   class="form-control"
-                  placeholder="Additional context or immediate mitigations applied..."
+                  placeholder="Additional operator notes..."
                 ></textarea>
               </div>
 
-              <div class="form-actions mt-4">
+              <div class="automatic-state-note">
+                Ticket state is managed automatically: OPEN before review, CLOSED after verification is submitted.
+              </div>
+
+              <div v-if="!isClosed" class="form-actions mt-4">
                 <button type="submit" class="btn btn-primary" :disabled="submittingAction">
                   <span v-if="submittingAction">Saving Verification...</span>
-                  <span v-else>Submit Verification (PATCH)</span>
+                  <span v-else>Submit Verification</span>
                 </button>
               </div>
             </form>
-          </div>
-
-          <!-- TAB 2: Analytical Evidence & RCA (WHY) -->
-          <div v-show="activeTab === 'evidence'" class="tab-panel">
-            <div class="evidence-box">
-              <div class="evidence-banner">
-                <span class="info-label">Read-Only Engine Provenance</span>
-                <span class="info-sub">Generated by analytical engine run; immutable via frontend</span>
-              </div>
-
-              <div class="evidence-grid">
-                <div class="evidence-item">
-                  <span class="ev-label">Condition State</span>
-                  <StatusBadge :value="selectedTicket.condition_state" type="condition" />
-                </div>
-
-                <div class="evidence-item">
-                  <span class="ev-label">Analytical Priority</span>
-                  <StatusBadge :value="selectedTicket.priority" type="priority" />
-                </div>
-
-                <div class="evidence-item">
-                  <span class="ev-label">Matched RCA AR Number</span>
-                  <span class="ev-value mono-val">{{ selectedTicket.matched_rca_ar || 'None' }}</span>
-                </div>
-
-                <div class="evidence-item">
-                  <span class="ev-label">Evidence Strength</span>
-                  <span class="badge badge-watch">{{ selectedTicket.evidence_strength || 'MODERATE' }}</span>
-                </div>
-
-                <div class="evidence-item">
-                  <span class="ev-label">Normal Streak Counter</span>
-                  <span class="ev-value">{{ selectedTicket.normal_streak ?? 0 }} cycles</span>
-                </div>
-
-                <div class="evidence-item">
-                  <span class="ev-label">Last Observation Time</span>
-                  <span class="ev-value">{{ formatTime(selectedTicket.last_observation_time) }}</span>
-                </div>
-              </div>
-
-              <div v-if="selectedTicket.field_observation" class="observation-record mt-4">
-                <h4 class="obs-title">Latest Logged Observation:</h4>
-                <p class="obs-text">{{ selectedTicket.field_observation }}</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- TAB 3: History & Audit Log -->
-          <div v-show="activeTab === 'history'" class="tab-panel">
-            <div v-if="auditLogs.length === 0" class="audit-empty">
-              No audit logs recorded for this ticket.
-            </div>
-            <div v-else class="audit-timeline">
-              <div v-for="log in auditLogs" :key="log.audit_id" class="audit-card">
-                <div class="audit-card-header">
-                  <div class="audit-actor">
-                    <span class="actor-source">{{ log.update_source || 'SYSTEM' }}</span>
-                    <span v-if="log.operator_name" class="actor-name">({{ log.operator_name }})</span>
-                  </div>
-                  <span class="audit-time">{{ formatTime(log.event_time) }}</span>
-                </div>
-
-                <div class="audit-transitions">
-                  <span class="transition-pill">
-                    State: {{ log.previous_ticket_state || '—' }} → <strong>{{ log.new_ticket_state || 'OPEN' }}</strong>
-                  </span>
-                  <span v-if="log.new_action_status" class="transition-pill">
-                    Action: {{ log.previous_action_status || '—' }} → <strong>{{ log.new_action_status }}</strong>
-                  </span>
-                  <span v-if="log.operator_decision" class="transition-pill decision-pill">
-                    Decision: <strong>{{ log.operator_decision }}</strong>
-                  </span>
-                </div>
-
-                <p v-if="log.field_observation" class="audit-detail-text">
-                  <strong>Observation:</strong> {{ log.field_observation }}
-                </p>
-                <p v-if="log.comment" class="audit-detail-text">
-                  <strong>Comment:</strong> {{ log.comment }}
-                </p>
-              </div>
-            </div>
           </div>
         </div>
       </section>
     </div>
 
-    <!-- Create Ticket Modal -->
-    <div v-if="showCreateModal" class="modal-backdrop" @click.self="closeCreateModal">
-      <div class="modal-container">
-        <div class="modal-header">
-          <h2 class="modal-title">Create Problem Ticket</h2>
-          <button class="modal-close-btn" @click="closeCreateModal">×</button>
-        </div>
-
-        <form @submit.prevent="submitCreateTicket">
-          <div class="modal-body">
-            <div v-if="createModalError" class="modal-error-alert">
-              <span>⚠ {{ createModalError }}</span>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group flex-1">
-                <label class="form-label required">Ticket ID</label>
-                <input
-                  v-model="newTicket.ticket_id"
-                  type="text"
-                  class="form-control"
-                  placeholder="e.g. TICKET-20261004-31PM01A"
-                  required
-                />
-              </div>
-
-              <div class="form-group flex-1">
-                <label class="form-label required">Asset</label>
-                <select v-model="newTicket.asset_id" class="form-control" required>
-                  <option disabled value="">Select asset...</option>
-                  <option v-for="asset in assets" :key="asset.asset_id" :value="asset.asset_id">
-                    {{ asset.tag_number }} — {{ asset.asset_name }}
-                  </option>
-                </select>
-              </div>
-            </div>
-
-            <div class="form-row mt-3">
-              <div class="form-group flex-1">
-                <label class="form-label required">Condition State</label>
-                <select v-model="newTicket.condition_state" class="form-control" required>
-                  <option value="ANOMALY">ANOMALY</option>
-                  <option value="WARNING">WARNING</option>
-                  <option value="WATCH">WATCH</option>
-                  <option value="NORMAL">NORMAL</option>
-                </select>
-              </div>
-
-              <div class="form-group flex-1">
-                <label class="form-label required">Priority</label>
-                <select v-model="newTicket.priority" class="form-control" required>
-                  <option value="P1">P1 (Critical)</option>
-                  <option value="P2">P2 (Urgent)</option>
-                  <option value="P3">P3 (Elevated)</option>
-                  <option value="P4">P4 (Advisory)</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="form-row mt-3">
-              <div class="form-group flex-1">
-                <label class="form-label">Matched RCA AR (Optional)</label>
-                <input
-                  v-model="newTicket.matched_rca_ar"
-                  type="text"
-                  placeholder="e.g. AR-2026-089"
-                  class="form-control"
-                />
-              </div>
-
-              <div class="form-group flex-1">
-                <label class="form-label">Evidence Strength</label>
-                <select v-model="newTicket.evidence_strength" class="form-control">
-                  <option value="STRONG">STRONG</option>
-                  <option value="MODERATE">MODERATE</option>
-                  <option value="WEAK">WEAK</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div class="modal-footer">
-            <button type="button" class="btn btn-outline" @click="closeCreateModal" :disabled="submittingCreate">
-              Cancel
-            </button>
-            <button type="submit" class="btn btn-primary" :disabled="submittingCreate">
-              <span v-if="submittingCreate">Creating Ticket...</span>
-              <span v-else>Create Ticket</span>
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { apiClient } from '@/api/client'
 import { ENDPOINTS } from '@/api/endpoints'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import DataTable from '@/components/common/DataTable.vue'
 
 const route = useRoute()
+const router = useRouter()
 
 // State
 const assets = ref([])
@@ -470,46 +322,27 @@ const tickets = ref([])
 const loadingTickets = ref(false)
 const loadingDetail = ref(false)
 const submittingAction = ref(false)
-const submittingCreate = ref(false)
 
 const selectedTicket = ref(null)
-const auditLogs = ref([])
-const activeTab = ref('verification')
+const selectedRcaEvidence = ref(null)
+const activeTab = ref('evidence')
 
 const successBanner = ref('')
 const errorBanner = ref('')
-const createModalError = ref('')
-const showCreateModal = ref(false)
 
 // Filters
 const filterAssetId = ref('')
 const filterPriority = ref('')
 const filterTicketState = ref('')
+const currentPage = ref(1)
+const pageSize = ref(10)
 
 // Verification form state
 const actionForm = ref({
   operator_decision: 'CONFIRMED',
-  ticket_state: 'IN_PROGRESS',
-  action_status: 'INVESTIGATING',
   last_operator_name: '',
   field_observation: '',
   operator_comment: ''
-})
-
-// Create ticket modal state
-const newTicket = ref({
-  ticket_id: '',
-  asset_id: '',
-  opened_at: '',
-  condition_state: 'ANOMALY',
-  priority: 'P1',
-  owner_role: 'Operator',
-  ticket_state: 'OPEN',
-  action_status: 'NOT_STARTED',
-  normal_streak: 0,
-  matched_rca_ar: '',
-  evidence_strength: 'STRONG',
-  update_source: 'ENGINE'
 })
 
 // Table Columns
@@ -519,9 +352,36 @@ const ticketTableColumns = [
   { key: 'condition_state', label: 'Condition', width: '15%' },
   { key: 'priority', label: 'Priority', width: '12%' },
   { key: 'ticket_state', label: 'State', width: '12%' },
-  { key: 'action_status', label: 'Action Status', width: '14%' },
   { key: 'actions', label: '', align: 'right', width: '10%' }
 ]
+
+const isClosed = computed(() =>
+  (selectedTicket.value?.ticket_state || '').toUpperCase() === 'CLOSED'
+)
+
+const problemReason = computed(() =>
+  selectedRcaEvidence.value?.problem_statement || 'Not available'
+)
+
+const rcaIndication = computed(() =>
+  selectedRcaEvidence.value?.root_cause_statement || 'Not available'
+)
+
+const fetchMatchedRcaEvidence = async (arNo) => {
+  selectedRcaEvidence.value = null
+  if (!arNo) return
+  try {
+    const res = await apiClient.get(ENDPOINTS.RCA_BY_AR(arNo))
+    selectedRcaEvidence.value = res.data?.data || res.data || null
+  } catch (err) {
+    console.error(`Failed to load matched RCA ${arNo}:`, err)
+  }
+}
+
+const goToCapa = (arNo) => {
+  if (!arNo) return
+  router.push({ path: '/reliability/capa', query: { ar_no: arNo } })
+}
 
 // Filtered Tickets
 const filteredTickets = computed(() => {
@@ -531,6 +391,17 @@ const filteredTickets = computed(() => {
     if (filterTicketState.value && (t.ticket_state || '').toUpperCase() !== filterTicketState.value) return false
     return true
   })
+})
+
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(filteredTickets.value.length / pageSize.value))
+)
+
+const paginatedTickets = computed(() => {
+  if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredTickets.value.slice(start, start + pageSize.value)
 })
 
 // Helpers
@@ -563,6 +434,7 @@ const resetFilters = () => {
   filterAssetId.value = ''
   filterPriority.value = ''
   filterTicketState.value = ''
+  currentPage.value = 1
 }
 
 // Data Fetching
@@ -582,17 +454,11 @@ const fetchTickets = async () => {
     const res = await apiClient.get(ENDPOINTS.WORKFLOW_TICKETS)
     tickets.value = res.data?.data || []
 
-    // If route specifies ticket_id or ticket was already selected, maintain selection
-    const targetId = route.query.ticket_id || selectedTicket.value?.ticket_id
-    if (targetId) {
+    // Do not auto-open a ticket. Only honor an explicit route ticket_id.
+    const targetId = route.query.ticket_id
+    if (targetId && !selectedTicket.value) {
       const match = tickets.value.find(t => t.ticket_id === targetId)
-      if (match) {
-        selectTicket(targetId)
-      } else if (tickets.value.length > 0 && !selectedTicket.value) {
-        selectTicket(tickets.value[0].ticket_id)
-      }
-    } else if (tickets.value.length > 0 && !selectedTicket.value) {
-      selectTicket(tickets.value[0].ticket_id)
+      if (match) await selectTicket(targetId)
     }
   } catch (err) {
     errorBanner.value = err.message || 'Failed to retrieve workflow problem tickets.'
@@ -608,20 +474,15 @@ const selectTicket = async (ticketId) => {
     const resTicket = await apiClient.get(ENDPOINTS.WORKFLOW_TICKET_BY_ID(ticketId))
     const ticketObj = resTicket.data?.data || resTicket.data || {}
     selectedTicket.value = ticketObj
+    await fetchMatchedRcaEvidence(ticketObj.matched_rca_ar)
 
-    // Populate action form with current values
     actionForm.value = {
       operator_decision: ticketObj.operator_decision || 'CONFIRMED',
-      ticket_state: ticketObj.ticket_state || 'IN_PROGRESS',
-      action_status: ticketObj.action_status || 'INVESTIGATING',
       last_operator_name: ticketObj.last_operator_name || '',
       field_observation: ticketObj.field_observation || '',
       operator_comment: ticketObj.operator_comment || ''
     }
-
-    // 2. Fetch ticket audit logs
-    const resLogs = await apiClient.get(ENDPOINTS.WORKFLOW_TICKET_AUDIT_LOGS(ticketId))
-    auditLogs.value = resLogs.data?.data || []
+    activeTab.value = 'evidence'
   } catch (err) {
     errorBanner.value = err.message || `Failed to load details for ticket ${ticketId}`
   } finally {
@@ -629,17 +490,23 @@ const selectTicket = async (ticketId) => {
   }
 }
 
+const closeTicket = () => {
+  selectedTicket.value = null
+  selectedRcaEvidence.value = null
+  activeTab.value = 'evidence'
+}
+
 // Verification Action Submission (PATCH)
 const submitVerification = async () => {
-  if (!selectedTicket.value) return
+  if (!selectedTicket.value || isClosed.value) return
   submittingAction.value = true
   errorBanner.value = ''
   successBanner.value = ''
 
   try {
     const payload = {
-      ticket_state: actionForm.value.ticket_state,
-      action_status: actionForm.value.action_status,
+      ticket_state: 'CLOSED',
+      action_status: 'COMPLETED',
       operator_decision: actionForm.value.operator_decision,
       last_operator_name: actionForm.value.last_operator_name,
       operator_comment: actionForm.value.operator_comment || null,
@@ -662,70 +529,6 @@ const submitVerification = async () => {
   }
 }
 
-// Create Ticket Modal
-const openCreateModal = () => {
-  createModalError.value = ''
-  const defaultAssetId = assets.value.length > 0 ? assets.value[0].asset_id : ''
-  const dateStr = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 8)
-  newTicket.value = {
-    ticket_id: `TICKET-${dateStr}-${assets.value[0]?.tag_number || 'GEN01'}`,
-    asset_id: defaultAssetId,
-    opened_at: new Date().toISOString(),
-    condition_state: 'ANOMALY',
-    priority: 'P1',
-    owner_role: 'Operator',
-    ticket_state: 'OPEN',
-    action_status: 'NOT_STARTED',
-    normal_streak: 0,
-    matched_rca_ar: '',
-    evidence_strength: 'STRONG',
-    update_source: 'ENGINE'
-  }
-  showCreateModal.value = true
-}
-
-const closeCreateModal = () => {
-  if (!submittingCreate.value) {
-    showCreateModal.value = false
-  }
-}
-
-const submitCreateTicket = async () => {
-  createModalError.value = ''
-  if (!newTicket.value.ticket_id || !newTicket.value.asset_id) {
-    createModalError.value = 'Ticket ID and Asset are required.'
-    return
-  }
-
-  submittingCreate.value = true
-  try {
-    const payload = {
-      ticket_id: newTicket.value.ticket_id,
-      asset_id: Number(newTicket.value.asset_id),
-      opened_at: new Date().toISOString(),
-      condition_state: newTicket.value.condition_state,
-      priority: newTicket.value.priority,
-      owner_role: newTicket.value.owner_role || 'Operator',
-      ticket_state: newTicket.value.ticket_state || 'OPEN',
-      action_status: newTicket.value.action_status || 'NOT_STARTED',
-      normal_streak: Number(newTicket.value.normal_streak) || 0,
-      matched_rca_ar: newTicket.value.matched_rca_ar || null,
-      evidence_strength: newTicket.value.evidence_strength || 'STRONG',
-      update_source: 'OPERATOR'
-    }
-
-    await apiClient.post(ENDPOINTS.WORKFLOW_TICKETS, payload)
-
-    successBanner.value = `Ticket ${payload.ticket_id} created successfully.`
-    closeCreateModal()
-    await fetchTickets()
-    selectTicket(payload.ticket_id)
-  } catch (err) {
-    createModalError.value = err.message || 'Failed to create problem ticket.'
-  } finally {
-    submittingCreate.value = false
-  }
-}
 
 onMounted(async () => {
   await fetchAssets()
@@ -827,9 +630,13 @@ onMounted(async () => {
 /* 2-Column Split Workspace */
 .workspace-grid {
   display: grid;
-  grid-template-columns: 50% 50%;
+  grid-template-columns: 1fr;
   gap: 20px;
   align-items: flex-start;
+}
+
+.workspace-grid.has-selection {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 @media (max-width: 1100px) {
@@ -1336,4 +1143,47 @@ onMounted(async () => {
   padding: 4px 10px;
   font-size: var(--font-size-xs);
 }
+
+.workspace-header-actions { display: flex; align-items: center; gap: 10px; }
+.workspace-close {
+  width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text-muted); cursor: pointer; font-size: 20px; line-height: 1;
+}
+.workspace-close:hover { color: var(--primary-dark); background: var(--surface-alt); }
+.automatic-state-note {
+  margin-top: 14px; padding: 9px 12px; border-radius: var(--radius-sm);
+  background: var(--surface-alt); color: var(--text-muted); font-size: 11px;
+  border: 1px solid var(--border-subtle);
+}
+
+
+.pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+.page-size, .page-nav { display: flex; align-items: center; gap: 8px; }
+.page-size-select { min-width: 68px; }
+.page-btn { padding: 5px 10px; }
+.page-btn:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 760px) {
+  .pagination-bar { flex-direction: column; align-items: flex-start; }
+}
+
+
+.evidence-item-wide { grid-column: 1 / -1; }
+.evidence-text { line-height: 1.45; white-space: pre-wrap; }
+.rca-link-btn {
+  width: fit-content; border: 1px solid var(--primary-blue); background: var(--surface);
+  color: var(--primary-blue); border-radius: var(--radius-sm); padding: 5px 9px;
+  font: inherit; font-weight: 700; cursor: pointer;
+}
+.rca-link-btn:hover { background: var(--surface-alt); }
+
 </style>

@@ -8,18 +8,11 @@
           <span class="crumb-separator">/</span>
           <span class="crumb-active">Sensor &amp; Parameters</span>
         </div>
-        <h1 class="view-title">Sensor &amp; Parameter Tags</h1>
-        <p class="view-subtitle">
-          Tag mappings, measurement parameters, and sensor instrumentation across assets.
-          Read-only — tag configurations are managed by the backend system.
-        </p>
+        <h1 class="view-title">Sensor &amp; Parameter Mapping</h1>
+        <p class="view-subtitle">Review sensor mappings and measurement parameters assigned to plant assets.</p>
       </div>
-
       <div class="header-actions">
-        <button class="btn btn-outline" @click="fetchTags" :disabled="loading">
-          <span v-if="loading">Refreshing...</span>
-          <span v-else>↻ Refresh</span>
-        </button>
+        <button class="btn btn-primary" @click="showCreateNotice">+ Add Sensor Mapping</button>
       </div>
     </header>
 
@@ -62,6 +55,11 @@
       </div>
     </div>
 
+    <div v-if="actionNotice" class="action-notice">
+      {{ actionNotice }}
+      <button class="notice-close" @click="actionNotice = ''">×</button>
+    </div>
+
     <!-- HOW: Tags List / Table -->
     <div class="card tags-card">
       <!-- Loading State -->
@@ -85,32 +83,50 @@
       <div v-else>
         <DataTable
           :columns="tagColumns"
-          :data="paginatedTags"
+          :rows="paginatedTags"
           :empty-message="'No sensor tags available.'"
         >
-          <template #cell-is_active="{ row }">
+          <template #item-asset_id="{ item }">
+            <span>{{ assetLabel(item.asset_id) }}</span>
+          </template>
+
+          <template #item-is_active="{ item }">
             <span
-              v-if="row.is_active !== undefined"
+              v-if="item.is_active !== undefined"
               class="badge"
-              :class="row.is_active ? 'badge-active' : 'badge-inactive'"
+              :class="item.is_active ? 'badge-active' : 'badge-inactive'"
             >
-              {{ row.is_active ? 'Active' : 'Inactive' }}
+              {{ item.is_active ? 'Active' : 'Inactive' }}
             </span>
             <span v-else class="text-muted">—</span>
           </template>
 
-          <template #cell-actions="{ row }">
-            <button class="btn btn-outline btn-xs" @click="openDetail(row)">
-              View Details
+          <template #item-actions="{ item }">
+            <div class="row-actions">
+              <button class="btn btn-outline btn-xs" @click="openDetail(item)">
+              View
             </button>
+              <button class="btn btn-primary btn-xs" @click="showUpdateNotice">Edit</button>
+            </div>
           </template>
         </DataTable>
 
         <!-- Pagination -->
         <div class="pagination-bar" v-if="totalPages > 1">
-          <span class="pagination-info">
-            Showing {{ ((page - 1) * PAGE_SIZE) + 1 }}–{{ Math.min(page * PAGE_SIZE, tags.length) }} of {{ tags.length }} records
-          </span>
+          <div class="pagination-left">
+            <span class="pagination-info">
+              Showing {{ ((page - 1) * pageSize) + 1 }}–{{ Math.min(page * pageSize, tags.length) }} of {{ tags.length }} records
+            </span>
+            <label class="page-size-control">
+              Rows
+              <select v-model.number="pageSize" class="filter-control page-size-select">
+                <option :value="10">10</option>
+                <option :value="25">25</option>
+                <option :value="50">50</option>
+                <option :value="100">100</option>
+              </select>
+            </label>
+          </div>
           <div class="pagination-controls">
             <button
               class="btn btn-outline btn-xs"
@@ -161,7 +177,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import apiClient from '../api/client.js'
 import { ENDPOINTS } from '../api/endpoints.js'
 import DataTable from '../components/common/DataTable.vue'
@@ -172,7 +188,8 @@ const assetOptions = ref([])
 const loading = ref(false)
 const error = ref('')
 const page = ref(1)
-const PAGE_SIZE = 25
+const pageSize = ref(10)
+const actionNotice = ref('')
 
 // Contracted Filters: asset_id, canonical_param, is_active
 const filters = ref({
@@ -188,7 +205,6 @@ const selectedTag = ref(null)
 // Dynamic columns inferred or contracted
 const baseColumns = [
   { key: 'tag_id', label: 'Tag ID', width: '90px' },
-  { key: 'asset_id', label: 'Asset ID', width: '90px' },
   { key: 'tag_name', label: 'Tag Name' },
   { key: 'tag_number', label: 'Tag Number' },
   { key: 'canonical_param', label: 'Canonical Param' },
@@ -210,7 +226,7 @@ const tagColumns = computed(() => {
     if (keys.includes(k) && !cols.some(c => c.key === k)) {
       cols.push({
         key: k,
-        label: formatKey(k),
+        label: k === 'asset_id' ? 'Asset' : formatKey(k),
         width: k === 'is_active' ? '100px' : k.endsWith('_id') || k === 'id' ? '90px' : undefined
       })
     }
@@ -218,7 +234,7 @@ const tagColumns = computed(() => {
 
   // Append any other unknown returned keys
   keys.forEach(k => {
-    if (!cols.some(c => c.key === k) && typeof firstItem[k] !== 'object') {
+    if (k !== 'source_sheet' && !cols.some(c => c.key === k) && typeof firstItem[k] !== 'object') {
       cols.push({ key: k, label: formatKey(k) })
     }
   })
@@ -229,10 +245,10 @@ const tagColumns = computed(() => {
 })
 
 // Pagination
-const totalPages = computed(() => Math.max(1, Math.ceil(tags.value.length / PAGE_SIZE)))
+const totalPages = computed(() => Math.max(1, Math.ceil(tags.value.length / pageSize.value)))
 const paginatedTags = computed(() => {
-  const start = (page.value - 1) * PAGE_SIZE
-  return tags.value.slice(start, start + PAGE_SIZE)
+  const start = (page.value - 1) * pageSize.value
+  return tags.value.slice(start, start + pageSize.value)
 })
 
 // Debounce helper
@@ -269,35 +285,45 @@ const fetchTags = async () => {
   loading.value = true
   error.value = ''
   try {
-    let url = ENDPOINTS.SENSOR_TAGS
     const params = {}
-
-    if (filters.value.asset_id) {
-      // Contract supports GET /api/v1/assets/{asset_id}/tags or query filter ?asset_id=
-      url = ENDPOINTS.ASSET_TAGS(filters.value.asset_id)
-    }
-
-    if (filters.value.canonical_param) {
+    if (filters.value.asset_id) params.asset_id = filters.value.asset_id
+    if (filters.value.canonical_param?.trim()) {
       params.canonical_param = filters.value.canonical_param.trim()
     }
-    if (filters.value.is_active !== '') {
-      params.is_active = filters.value.is_active
-    }
+    if (filters.value.is_active !== '') params.is_active = filters.value.is_active
 
-    const { data } = await apiClient.get(url, { params })
-    tags.value = Array.isArray(data) ? data : (data.data || [])
+    const { data } = await apiClient.get(ENDPOINTS.SENSOR_TAGS, { params })
+    const payload = data?.data ?? data?.items ?? data
+    tags.value = Array.isArray(payload) ? payload : []
     page.value = 1
   } catch (err) {
-    error.value = err.message || 'Failed to load sensor tags.'
+    console.error('Failed to load sensor tags:', err)
+    error.value = err.response?.data?.detail || err.message || 'Failed to load sensor tags.'
     tags.value = []
   } finally {
     loading.value = false
   }
 }
 
+const assetLabel = (assetId) => {
+  const asset = assetOptions.value.find(a => String(a.asset_id) === String(assetId))
+  if (!asset) return assetId ?? '—'
+  return asset.tag_number
+    ? `${asset.tag_number}${asset.asset_name ? ` — ${asset.asset_name}` : ''}`
+    : (asset.asset_name || assetId || '—')
+}
+
 const openDetail = (row) => {
   selectedTag.value = row
   showDetailModal.value = true
+}
+
+const showCreateNotice = () => {
+  actionNotice.value = 'Add Sensor Mapping is not available in the current backend API contract yet.'
+}
+
+const showUpdateNotice = () => {
+  actionNotice.value = 'Update Sensor Mapping is not available in the current backend API contract yet.'
 }
 
 const formatKey = (key) => {
@@ -306,9 +332,11 @@ const formatKey = (key) => {
     .replace(/\b\w/g, c => c.toUpperCase())
 }
 
-onMounted(() => {
-  fetchAssetsList()
-  fetchTags()
+watch(pageSize, () => { page.value = 1 })
+
+onMounted(async () => {
+  await fetchAssetsList()
+  await fetchTags()
 })
 </script>
 
@@ -332,23 +360,23 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 0.8rem;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
   margin-bottom: 6px;
 }
 
-.crumb-separator { color: var(--text-tertiary, #8b8fa3); }
-.crumb-active { color: var(--text-secondary, #b4b7c9); }
+.crumb-separator { color: var(--text-muted, #64748b); }
+.crumb-active { color: var(--text-secondary, #475569); }
 
 .view-title {
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--text-primary, #e8eaf0);
+  color: var(--text-primary, #0f2747);
   margin: 0 0 6px 0;
 }
 
 .view-subtitle {
   font-size: 0.85rem;
-  color: var(--text-secondary, #b4b7c9);
+  color: var(--text-secondary, #475569);
   margin: 0;
   max-width: 780px;
   line-height: 1.4;
@@ -361,8 +389,8 @@ onMounted(() => {
 }
 
 .card {
-  background: var(--bg-card, #161826);
-  border: 1px solid var(--border-default, #2a2d42);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dbe5f0);
   border-radius: var(--radius-lg, 12px);
   padding: var(--space-4, 16px);
 }
@@ -385,23 +413,23 @@ onMounted(() => {
 .filter-label {
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--text-secondary, #b4b7c9);
+  color: var(--text-secondary, #475569);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .filter-control {
   padding: 8px 12px;
-  background: var(--bg-input, #0f111a);
-  border: 1px solid var(--border-default, #2a2d42);
+  background: var(--surface-alt, #f7faff);
+  border: 1px solid var(--border, #dbe5f0);
   border-radius: var(--radius-md, 8px);
-  color: var(--text-primary, #e8eaf0);
+  color: var(--text-primary, #0f2747);
   font-size: 0.85rem;
 }
 
 .filter-control:focus {
   outline: none;
-  border-color: var(--primary-500, #4f8cff);
+  border-color: var(--primary-blue, #1677c8);
 }
 
 .filter-actions {
@@ -422,7 +450,7 @@ onMounted(() => {
   justify-content: center;
   gap: 12px;
   padding: 50px 20px;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
 }
 
 .state-container.error-state {
@@ -457,7 +485,7 @@ onMounted(() => {
 }
 
 .text-muted {
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
 }
 
 .btn {
@@ -475,13 +503,13 @@ onMounted(() => {
 
 .btn-outline {
   background: transparent;
-  border: 1px solid var(--border-default, #2a2d42);
-  color: var(--text-secondary, #b4b7c9);
+  border: 1px solid var(--border, #dbe5f0);
+  color: var(--text-secondary, #475569);
 }
 
 .btn-outline:hover:not(:disabled) {
-  background: var(--bg-hover, #1e2133);
-  color: var(--text-primary, #e8eaf0);
+  background: var(--surface-alt, #f7faff);
+  color: var(--text-primary, #0f2747);
 }
 
 .btn-outline:disabled {
@@ -504,14 +532,14 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border-top: 1px solid var(--border-default, #2a2d42);
+  border-top: 1px solid var(--border, #dbe5f0);
   flex-wrap: wrap;
   gap: 10px;
 }
 
 .pagination-info {
   font-size: 0.8rem;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
 }
 
 .pagination-controls {
@@ -522,14 +550,14 @@ onMounted(() => {
 
 .page-indicator {
   font-size: 0.8rem;
-  color: var(--text-secondary, #b4b7c9);
+  color: var(--text-secondary, #475569);
 }
 
 .spinner {
   width: 28px;
   height: 28px;
-  border: 3px solid var(--border-default, #2a2d42);
-  border-top-color: var(--primary-500, #4f8cff);
+  border: 3px solid var(--border, #dbe5f0);
+  border-top-color: var(--primary-blue, #1677c8);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -549,8 +577,8 @@ onMounted(() => {
 }
 
 .modal-dialog {
-  background: var(--bg-card, #161826);
-  border: 1px solid var(--border-default, #2a2d42);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dbe5f0);
   border-radius: var(--radius-lg, 12px);
   width: 100%;
   max-width: 520px;
@@ -563,31 +591,31 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--border-default, #2a2d42);
+  border-bottom: 1px solid var(--border, #dbe5f0);
 }
 
 .modal-title {
   font-size: 1.1rem;
   font-weight: 600;
-  color: var(--text-primary, #e8eaf0);
+  color: var(--text-primary, #0f2747);
   margin: 0;
 }
 
 .modal-subtitle {
   font-size: 0.78rem;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
 }
 
 .modal-close-btn {
   background: none;
   border: none;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
   font-size: 1.3rem;
   cursor: pointer;
   padding: 4px;
 }
 
-.modal-close-btn:hover { color: var(--text-primary, #e8eaf0); }
+.modal-close-btn:hover { color: var(--text-primary, #0f2747); }
 
 .modal-body {
   padding: 20px;
@@ -605,22 +633,22 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: var(--bg-input, #0f111a);
+  background: var(--surface-alt, #f7faff);
   padding: 10px 12px;
   border-radius: var(--radius-md, 8px);
-  border: 1px solid var(--border-default, #2a2d42);
+  border: 1px solid var(--border, #dbe5f0);
 }
 
 .detail-label {
   font-size: 0.72rem;
-  color: var(--text-tertiary, #8b8fa3);
+  color: var(--text-muted, #64748b);
   text-transform: uppercase;
 }
 
 .detail-value {
   font-size: 0.85rem;
   font-weight: 500;
-  color: var(--text-primary, #e8eaf0);
+  color: var(--text-primary, #0f2747);
   word-break: break-all;
 }
 
@@ -628,6 +656,19 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   padding: 14px 20px;
-  border-top: 1px solid var(--border-default, #2a2d42);
+  border-top: 1px solid var(--border, #dbe5f0);
 }
+
+.filter-card { background: var(--surface, #fff); }
+.filter-bar { gap: 10px; }
+.filter-control { background: var(--surface, #fff); color: var(--text-primary,#0f2747); }
+.row-actions { display:flex; gap:6px; white-space:nowrap; }
+.btn-primary { background:var(--primary-blue,#1677c8); color:#fff; }
+.pagination-left { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.page-size-control { display:flex; align-items:center; gap:6px; font-size:.78rem; color:var(--text-muted,#64748b); }
+.page-size-select { width:auto; min-width:68px; padding:4px 7px; }
+.action-notice { display:flex; align-items:center; gap:8px; padding:10px 14px; background:var(--surface-alt,#f7faff); border:1px solid var(--border,#dbe5f0); border-radius:8px; color:var(--text-secondary,#475569); font-size:.82rem; }
+.notice-close { margin-left:auto; border:0; background:transparent; cursor:pointer; color:inherit; font-size:18px; }
+.modal-backdrop { background:rgba(15,39,71,.28); }
+
 </style>
